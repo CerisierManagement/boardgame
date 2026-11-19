@@ -1,1454 +1,1510 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  Shield, 
-  Users, 
-  HelpCircle, 
-  RotateCcw, 
-  Play, 
-  ChevronRight, 
-  Eye, 
-  EyeOff, 
-  Info, 
-  Award, 
-  Clock, 
-  CheckCircle2, 
-  AlertCircle,
-  Dices,
+import React, { useState, useMemo } from "react";
+import {
+  Users,
+  Scale,
+  RotateCcw,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  Sparkles,
+  Shuffle,
+  CheckCircle2,
+  AlertTriangle,
+  ShieldAlert,
+  Coins,
+  MessageSquare,
+  Vote,
   Layers,
-  ArrowRight
-} from 'lucide-react';
+  Award,
+} from "lucide-react";
 
-// ==========================================
-// CONSTANTS & GAME DATA CONFIGURATIONS
-// ==========================================
+const ACTION_TYPES = ["elephant", "squirrel", "fox", "monkey"];
 
-const ACTION_CARDS = {
-  ELEPHANT: { name: 'ゾウ（全力奉仕）', animal: '🐘 ゾウ', contribution: 3, influence: 0, icon: '🐘', coolDown: false },
-  SQUIRREL: { name: 'リス（堅実な備蓄）', animal: '🐿️ リス', contribution: 1, influence: 1, icon: '🐿️', coolDown: false },
-  FOX:      { name: 'キツネ（秘密の工作）', animal: '🦊 キツネ', contribution: -1, influence: 3, icon: '🦊', coolDown: true },
-  MONKEY:   { name: 'サル（議論の撹乱）', animal: '🐒 サル', contribution: -2, influence: 1, icon: '🐒', coolDown: true },
+const ACTION_META = {
+  elephant: {
+    id: "elephant",
+    name: "全力奉仕（ゾウ）",
+    shortName: "ゾウ",
+    emoji: "🐘",
+    contribution: 3,
+    influence: 0,
+    locksRoleNextRound: false,
+    keepsOnBoardNextRound: false,
+    desc: "+3貢献 / 影響力0 / 制限なし",
+  },
+  squirrel: {
+    id: "squirrel",
+    name: "堅実な備蓄（リス）",
+    shortName: "リス",
+    emoji: "🐿️",
+    contribution: 1,
+    influence: 1,
+    locksRoleNextRound: false,
+    keepsOnBoardNextRound: false,
+    desc: "+1貢献 / 影響力+1 / 制限なし",
+  },
+  fox: {
+    id: "fox",
+    name: "秘密の工作（キツネ）",
+    shortName: "キツネ",
+    emoji: "🦊",
+    contribution: -1,
+    influence: 3,
+    locksRoleNextRound: true,
+    keepsOnBoardNextRound: true,
+    desc: "-1貢献 / 影響力+3 / 次R役職不可・手元留置",
+  },
+  monkey: {
+    id: "monkey",
+    name: "議論の撹乱（サル）",
+    shortName: "サル",
+    emoji: "🐒",
+    contribution: -2,
+    influence: 1,
+    locksRoleNextRound: true,
+    keepsOnBoardNextRound: true,
+    desc: "-2貢献 / 影響力+1 / 3秒指差し-1 / 次R役職不可・手元留置",
+  },
 };
 
-const ROLES = {
-  LION:    { name: '熱弁家', animal: 'ライオン 🦁', timing: '投票時', desc: '緑(賛成)を1枚以上出すと賛成+2' },
-  BEAVER:  { name: '調停者', animal: 'ビーバー 🦫', timing: '公開直後', desc: 'サルが出たら全体のマイナスを1回分(-2→0)無効化' },
-  DOVE:    { name: '運び屋', animal: 'ハト 🕊️', timing: '公開直後', desc: '他のプレイヤー1人に影響力トークンを1個渡す' },
-  OCTOPUS: { name: '策士',   animal: 'タコ 🐙', timing: '見張り後', desc: '自分がキツネならオープンして影響力+1' },
-  WOLF:    { name: '扇動者', animal: 'オオカミ 🐺', timing: '投票時', desc: '赤(反対)を1枚以上出すと反対合計-2(マイナス2強化)' },
-  OWL:     { name: '見張り', animal: 'フクロウ 🦉', timing: '公開前', desc: '他者1人とカード種宣言し公開。的中なら影響力+1' },
+const ROLE_META = {
+  lion: {
+    id: "lion",
+    name: "熱弁家（ライオン）",
+    shortName: "熱弁",
+    emoji: "🦁",
+    timing: "投票時",
+    desc: "緑（賛成）を1枚以上出して投票したとき、表向きにして賛成合計に+2。",
+  },
+  beaver: {
+    id: "beaver",
+    name: "調停者（ビーバー）",
+    shortName: "調停",
+    emoji: "🦫",
+    timing: "公開直後",
+    desc: "アクション公開直後に表向きにし、他のプレイヤー1人に影響力トークンを1個譲渡。",
+  },
+  dove: {
+    id: "dove",
+    name: "運び屋（ハト）",
+    shortName: "運び",
+    emoji: "🕊️",
+    timing: "公開直後",
+    desc: "このラウンドでサルが出たとき、表向きにして全体のマイナス補正（-2→0）を1回分無効化。",
+  },
+  octopus: {
+    id: "octopus",
+    name: "策士（タコ）",
+    shortName: "策士",
+    emoji: "🐙",
+    timing: "先行解決",
+    desc: "自分がキツネを出していた場合、アクションと役職を先行オープンし、影響力+1。",
+  },
+  wolf: {
+    id: "wolf",
+    name: "扇動者（オオカミ）",
+    shortName: "扇動",
+    emoji: "🐺",
+    timing: "投票時",
+    desc: "赤（反対）を1枚以上出して投票したとき、表向きにして反対合計のマイナス影響をさらに2強化。",
+  },
+  owl: {
+    id: "owl",
+    name: "見張り（フクロウ）",
+    shortName: "見張",
+    emoji: "🦉",
+    timing: "先行解決",
+    desc: "アクション一斉公開前に表向きにし、他者1人とカード種1つを宣言して単独公開（的中時、影響力+1）。",
+  },
 };
 
-// Configuration Table per player count (5 to 15) as defined in Spec Sheet p.2-p.3
-const CONFIG_BY_PLAYERS = {
-  5:  { herbivores: 3,  carnivores: 2, roles: ['LION', 'BEAVER', 'DOVE', 'OCTOPUS', 'WOLF'], supply: { ELEPHANT: 1, SQUIRREL: 1, FOX: 1, MONKEY: 1 }, winZone: [1, 8] },
-  6:  { herbivores: 4,  carnivores: 2, roles: ['LION', 'BEAVER', 'DOVE', 'OCTOPUS', 'WOLF', 'OWL'], supply: { ELEPHANT: 2, SQUIRREL: 2, FOX: 1, MONKEY: 1 }, winZone: [1, 9] },
-  7:  { herbivores: 5,  carnivores: 2, roles: ['LION', 'LION', 'BEAVER', 'DOVE', 'OCTOPUS', 'WOLF', 'OWL'], supply: { ELEPHANT: 2, SQUIRREL: 2, FOX: 1, MONKEY: 1 }, winZone: [1, 10] },
-  8:  { herbivores: 5,  carnivores: 3, roles: ['LION', 'LION', 'BEAVER', 'DOVE', 'OCTOPUS', 'WOLF', 'WOLF', 'OWL'], supply: { ELEPHANT: 2, SQUIRREL: 2, FOX: 1, MONKEY: 1 }, winZone: [1, 10] },
-  9:  { herbivores: 6,  carnivores: 3, roles: ['LION', 'LION', 'BEAVER', 'BEAVER', 'DOVE', 'OCTOPUS', 'WOLF', 'WOLF', 'OWL'], supply: { ELEPHANT: 3, SQUIRREL: 3, FOX: 1, MONKEY: 1 }, winZone: [1, 11] },
-  10: { herbivores: 6,  carnivores: 4, roles: ['LION', 'LION', 'BEAVER', 'BEAVER', 'DOVE', 'OCTOPUS', 'OCTOPUS', 'WOLF', 'WOLF', 'OWL'], supply: { ELEPHANT: 3, SQUIRREL: 3, FOX: 2, MONKEY: 1 }, winZone: [1, 11] },
-  11: { herbivores: 7,  carnivores: 4, roles: ['LION', 'LION', 'BEAVER', 'BEAVER', 'DOVE', 'DOVE', 'OCTOPUS', 'OCTOPUS', 'WOLF', 'WOLF', 'OWL'], supply: { ELEPHANT: 3, SQUIRREL: 3, FOX: 2, MONKEY: 2 }, winZone: [1, 12] },
-  12: { herbivores: 8,  carnivores: 4, roles: ['LION', 'LION', 'LION', 'BEAVER', 'BEAVER', 'DOVE', 'DOVE', 'OCTOPUS', 'OCTOPUS', 'WOLF', 'WOLF', 'OWL'], supply: { ELEPHANT: 3, SQUIRREL: 3, FOX: 2, MONKEY: 2 }, winZone: [1, 13] },
-  13: { herbivores: 9,  carnivores: 4, roles: ['LION', 'LION', 'LION', 'BEAVER', 'BEAVER', 'DOVE', 'DOVE', 'OCTOPUS', 'OCTOPUS', 'WOLF', 'WOLF', 'OWL', 'OWL'], supply: { ELEPHANT: 4, SQUIRREL: 4, FOX: 2, MONKEY: 2 }, winZone: [1, 14] },
-  14: { herbivores: 9,  carnivores: 5, roles: ['LION', 'LION', 'LION', 'BEAVER', 'BEAVER', 'DOVE', 'DOVE', 'OCTOPUS', 'OCTOPUS', 'WOLF', 'WOLF', 'WOLF', 'OWL', 'OWL'], supply: { ELEPHANT: 4, SQUIRREL: 4, FOX: 2, MONKEY: 2 }, winZone: [1, 14] },
-  15: { herbivores: 10, carnivores: 5, roles: ['LION', 'LION', 'LION', 'BEAVER', 'BEAVER', 'BEAVER', 'DOVE', 'DOVE', 'OCTOPUS', 'OCTOPUS', 'WOLF', 'WOLF', 'WOLF', 'OWL', 'OWL'], supply: { ELEPHANT: 4, SQUIRREL: 4, FOX: 2, MONKEY: 2 }, winZone: [1, 15] },
-};
-
-// Target values helper
-const getTargetValue = (round, playerCount) => {
-  switch (round) {
-    case 1: return playerCount;       // R1 = N
-    case 2: return playerCount + 2;   // R2 = N+2
-    case 3: return playerCount + 4;   // R3 = N+4
-    case 4: return playerCount + 1;   // R4 = N+1
-    case 5: return playerCount + 5;   // R5 = N+5
-    default: return playerCount;
+// 仕様書 6. 人数別・補充用共有サプライ初期予備枚数表
+function getInitialSupply(playerCount) {
+  if (playerCount === 5) {
+    return { elephant: 1, squirrel: 1, fox: 1, monkey: 1 };
   }
-};
+  if (playerCount >= 6 && playerCount <= 8) {
+    return { elephant: 2, squirrel: 2, fox: 1, monkey: 1 };
+  }
+  if (playerCount === 9) {
+    return { elephant: 3, squirrel: 1, fox: 3, monkey: 1 };
+  }
+  if (playerCount === 10) {
+    return { elephant: 3, squirrel: 3, fox: 2, monkey: 1 };
+  }
+  if (playerCount >= 11 && playerCount <= 12) {
+    return { elephant: 3, squirrel: 3, fox: 2, monkey: 2 };
+  }
+  return { elephant: 4, squirrel: 4, fox: 2, monkey: 2 };
+}
 
-// Helper Fisher-Yates shuffle
-function shuffle(array) {
-  const arr = [...array];
-  for (let i = arr.length - 1; i > 0; i--) {
+// 仕様書 7. 人数別配分表・役職内訳・勝利ゾーン
+function getConfigByPlayerCount(n) {
+  const table = {
+    5: { herb: 3, carn: 2, roles: { lion: 1, beaver: 1, dove: 1, octopus: 1, wolf: 1, owl: 0 } },
+    6: { herb: 4, carn: 2, roles: { lion: 1, beaver: 1, dove: 1, octopus: 1, wolf: 1, owl: 1 } },
+    7: { herb: 5, carn: 2, roles: { lion: 2, beaver: 1, dove: 1, octopus: 1, wolf: 1, owl: 1 } },
+    8: { herb: 5, carn: 3, roles: { lion: 2, beaver: 1, dove: 1, octopus: 1, wolf: 2, owl: 1 } },
+    9: { herb: 6, carn: 3, roles: { lion: 2, beaver: 2, dove: 1, octopus: 1, wolf: 2, owl: 1 } },
+    10: { herb: 6, carn: 4, roles: { lion: 2, beaver: 2, dove: 1, octopus: 2, wolf: 2, owl: 1 } },
+    11: { herb: 7, carn: 4, roles: { lion: 2, beaver: 2, dove: 2, octopus: 2, wolf: 2, owl: 1 } },
+    12: { herb: 8, carn: 4, roles: { lion: 3, beaver: 2, dove: 2, octopus: 2, wolf: 2, owl: 1 } },
+    13: { herb: 9, carn: 4, roles: { lion: 3, beaver: 2, dove: 2, octopus: 2, wolf: 2, owl: 2 } },
+    14: { herb: 9, carn: 5, roles: { lion: 3, beaver: 2, dove: 2, octopus: 2, wolf: 3, owl: 2 } },
+    15: { herb: 10, carn: 5, roles: { lion: 3, beaver: 3, dove: 2, octopus: 2, wolf: 3, owl: 2 } },
+  };
+  const cfg = table[n] || table[5];
+  const maxHerbWin = cfg.herb + 5;
+  return {
+    ...cfg,
+    herbMin: 1,
+    herbMax: maxHerbWin,
+    winText: `+1〜+${maxHerbWin}（肉食: 0以下 / +${maxHerbWin + 1}以上）`,
+  };
+}
+
+function getDefaultTarget(round, playerCount) {
+  const offsets = { 1: 0, 2: 2, 3: 4, 4: 1, 5: 5 };
+  return playerCount + (offsets[round] ?? 0);
+}
+
+function shuffleArray(arr) {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
+    [copy[i], copy[j]] = [copy[j], copy[i]];
   }
-  return arr;
+  return copy;
+}
+
+function dealRoles(playerCount) {
+  const cfg = getConfigByPlayerCount(playerCount);
+  const pool = [];
+  Object.entries(cfg.roles).forEach(([roleId, count]) => {
+    for (let i = 0; i < count; i++) pool.push(roleId);
+  });
+  return shuffleArray(pool).slice(0, playerCount);
+}
+
+function createInitialGame(playerCount = 5) {
+  const clamped = Math.max(5, Math.min(15, playerCount));
+  const cfg = getConfigByPlayerCount(clamped);
+  const factions = shuffleArray([
+    ...Array(cfg.herb).fill("herbivore"),
+    ...Array(cfg.carn).fill("carnivore"),
+  ]);
+  const roles = dealRoles(clamped);
+
+  const players = Array.from({ length: clamped }, (_, idx) => ({
+    id: idx,
+    name: `P${idx + 1}`,
+    faction: factions[idx],
+    role: roles[idx],
+    hand: [...ACTION_TYPES],
+    influence: 3,
+    lockedNextRound: false,
+    heldCards: [],
+    submittedAction: null,
+    submittedRole: false,
+    owlTargetId: null,
+    owlGuessAction: "elephant",
+    beaverTargetId: null,
+    voteGreen: 0,
+    voteRed: 0,
+  }));
+
+  return {
+    playerCount: clamped,
+    round: 1,
+    maxRounds: 5,
+    step: 1,
+    parentIndex: 0,
+    scale: 0,
+    target: getDefaultTarget(1, clamped),
+    supply: getInitialSupply(clamped),
+    negotiationSubPhase: "right",
+    negotiationSeconds: 60,
+    preRevealDone: false,
+    preRevealSummary: null,
+    actionRevealDone: false,
+    actionRevealSummary: null,
+    monkeyPenaltyTargets: [],
+    votingDone: false,
+    lastRoundResult: null,
+    players,
+    logs: [
+      `【セットアップ完了】${clamped}人プレイ（草食${cfg.herb}/肉食${cfg.carn}）で開始。森の天秤は「0」、第1ラウンド親は P1 です。`,
+    ],
+  };
 }
 
 export default function App() {
-  // Game Setup States
-  const [numPlayers, setNumPlayers] = useState(5);
-  const [gameState, setGameState] = useState('SETUP'); // SETUP, STEP1, STEP2, STEP3, STEP4_LOOKOUT, STEP4_TACTICIAN, STEP4_REVEAL, STEP4_CARRIER, STEP5, STEP6_VOTE, STEP6_RESULT, STEP6_DRAFT, GAME_OVER
-  const [round, setRound] = useState(1);
-  const [dealerIndex, setDealerIndex] = useState(0);
-  const [balance, setBalance] = useState(0);
-  const [targetValue, setTargetValue] = useState(5);
-  const [supply, setSupply] = useState({ ELEPHANT: 1, SQUIRREL: 1, FOX: 1, MONKEY: 1 });
-  const [players, setPlayers] = useState([]);
-  const [logs, setLogs] = useState([]);
-  const [debugMode, setDebugMode] = useState(true); // Toggle hidden info for testing
+  const [setupCount, setSetupCount] = useState(5);
+  const [game, setGame] = useState(() => createInitialGame(5));
+  const [gmView, setGmView] = useState(true);
+  const [selectedPlayerId, setSelectedPlayerId] = useState(0);
 
-  // Timer state for Step 2 & Step 5
-  const [timer, setTimer] = useState(60);
-  const [isTimerRunning, setIsTimerRunning] = useState(false);
-  const [timerPhase, setTimerPhase] = useState('RIGHT'); // 'RIGHT' or 'LEFT' for step 2
+  const config = useMemo(() => getConfigByPlayerCount(game.playerCount), [game.playerCount]);
+  const selectedPlayer = game.players[selectedPlayerId] || game.players[0];
 
-  // Interactive Sub-Step States
-  // Step 4.1: Lookout owl declarations
-  const [lookoutActions, setLookoutActions] = useState({}); // owlPlayerId: { targetId, declaredCard }
-  // Step 4.4: Carrier dove transfers
-  const [carrierTransfers, setCarrierTransfers] = useState({}); // dovePlayerId: targetId
-  // Step 5: Monkey target selections
-  const [monkeyTargets, setMonkeyTargets] = useState([]); // array of targetPlayerIds
-  // Step 6: Draft Queue
-  const [draftQueue, setDraftQueue] = useState([]); // array of playerIds who need to draft
-  const [currentDrafterIndex, setCurrentDrafterIndex] = useState(0);
-  // Temporary step 6 calculation results
-  const [step6Calc, setStep6Calc] = useState(null);
+  const appendLog = (prevLogs, text) => [...prevLogs, `[R${game.round}-S${game.step}] ${text}`];
 
-  // Active player config
-  const activeConfig = useMemo(() => CONFIG_BY_PLAYERS[numPlayers], [numPlayers]);
-
-  // Log Helper
-  const addLog = (msg) => {
-    setLogs((prev) => [`[R${round}] ${msg}`, ...prev]);
+  const handleReset = (count = setupCount) => {
+    const next = createInitialGame(count);
+    setGame(next);
+    setSelectedPlayerId(0);
   };
 
-  // Timer Effect
-  useEffect(() => {
-    let interval = null;
-    if (isTimerRunning && timer > 0) {
-      interval = setInterval(() => setTimer((t) => t - 1), 1000);
-    } else if (timer === 0 && isTimerRunning) {
-      setIsTimerRunning(false);
-      if (gameState === 'STEP2' && timerPhase === 'RIGHT') {
-        setTimerPhase('LEFT');
-        setTimer(60);
-        addLog('隣接交渉：左隣との交渉開始（60秒）');
-        setIsTimerRunning(true);
-      }
-    }
-    return () => clearInterval(interval);
-  }, [isTimerRunning, timer, gameState, timerPhase]);
-
-  // Init New Game
-  const initGame = () => {
-    const config = CONFIG_BY_PLAYERS[numPlayers];
-    
-    // Factions
-    let factionPool = [
-      ...Array(config.herbivores).fill('HERBIVORE'),
-      ...Array(config.carnivores).fill('CARNIVORE')
-    ];
-    factionPool = shuffle(factionPool);
-
-    // Roles
-    let rolePool = shuffle([...config.roles]);
-
-    const newPlayers = [];
-    for (let i = 0; i < numPlayers; i++) {
-      newPlayers.push({
-        id: i,
-        name: `P${i + 1}`,
-        faction: factionPool[i],
-        role: rolePool[i],
-        hand: ['ELEPHANT', 'SQUIRREL', 'FOX', 'MONKEY'],
-        tokens: 3,
-        coolDownCard: null,
-        // Turn states
-        selectedAction: null,
-        useRole: false,
-        lookoutRevealed: false,
-        voteColor: 'NONE',
-        voteAmount: 0,
-      });
-    }
-
-    setPlayers(newPlayers);
-    setSupply({ ...config.supply });
-    setBalance(0);
-    setRound(1);
-    setDealerIndex(0);
-    setTargetValue(getTargetValue(1, numPlayers));
-    setLogs([`=== 『森の会議』テスト開始 (人数: ${numPlayers}人 / 草食:${config.herbivores} 肉食:${config.carnivores}) ===`]);
-    setGameState('STEP1');
-  };
-
-  // Move to Step 1
-  const startStep1 = () => {
-    setGameState('STEP1');
-    setTargetValue(getTargetValue(round, numPlayers));
-    addLog(`--- 第${round}ラウンド 開始 (親: P${dealerIndex + 1}, 目標値: ${getTargetValue(round, numPlayers)}) ---`);
-  };
-
-  // Move to Step 2
-  const startStep2 = () => {
-    setGameState('STEP2');
-    setTimer(60);
-    setTimerPhase('RIGHT');
-    setIsTimerRunning(true);
-    addLog('Step 2: 隣接交渉開始（右隣1分）');
-  };
-
-  // Move to Step 3
-  const startStep3 = () => {
-    setIsTimerRunning(false);
-    setGameState('STEP3');
-    addLog('Step 3: アクションカード & 役職使用選択');
-  };
-
-  // Step 3 Randomize inputs
-  const autoFillStep3 = () => {
-    setPlayers(prev => prev.map(p => {
-      // Pick random from available hand
-      const randomAction = p.hand[Math.floor(Math.random() * p.hand.length)];
-      // Decide role use if available
-      const canUseRole = !p.coolDownCard;
-      const useRole = canUseRole ? Math.random() > 0.4 : false;
-      return {
-        ...p,
-        selectedAction: randomAction,
-        useRole: useRole
-      };
+  const updatePlayer = (playerId, updater) => {
+    setGame((prev) => ({
+      ...prev,
+      players: prev.players.map((p) =>
+        p.id === playerId ? (typeof updater === "function" ? updater(p) : { ...p, ...updater }) : p
+      ),
     }));
   };
 
-  // Confirm Step 3 and proceed to Step 4
-  const submitStep3 = () => {
-    // Validation
-    const unselected = players.find(p => !p.selectedAction);
-    if (unselected) {
-      alert(`${unselected.name} の提出アクションカードを選択してください。`);
-      return;
-    }
+  // Step 3: 全員ランダムアクション＆可能なら役職伏せ
+  const handleRandomizeSubmissions = () => {
+    setGame((prev) => {
+      const nextPlayers = prev.players.map((p) => {
+        const pickedAction = p.hand[Math.floor(Math.random() * p.hand.length)];
+        const canUseRole = !p.lockedNextRound && !!p.role;
+        const wantRole = canUseRole && Math.random() < 0.45;
+        let owlTargetId = p.owlTargetId;
+        let beaverTargetId = p.beaverTargetId;
 
-    addLog('Step 3 完了: 全員のカードが伏せて提出されました。');
-
-    // Check for Owls
-    const owls = players.filter(p => p.useRole && !p.coolDownCard && p.role === 'OWL');
-    if (owls.length > 0) {
-      // Setup lookout inputs
-      const initialLookout = {};
-      owls.forEach(o => {
-        // pick first available target that is not self
-        const defaultTarget = players.find(p => p.id !== o.id)?.id || 0;
-        initialLookout[o.id] = { targetId: defaultTarget, declaredCard: 'ELEPHANT' };
-      });
-      setLookoutActions(initialLookout);
-      setGameState('STEP4_LOOKOUT');
-      addLog('Step 4.1: 見張り（フクロウ）の能力解決');
-    } else {
-      proceedToTactician();
-    }
-  };
-
-  // Step 4.1 Resolve Lookout
-  const resolveLookout = () => {
-    let updatedPlayers = [...players];
-    const owls = updatedPlayers.filter(p => p.useRole && !p.coolDownCard && p.role === 'OWL');
-
-    // Resolve in order starting from dealer
-    const sortedOwls = [...owls].sort((a, b) => {
-      const distA = (a.id - dealerIndex + numPlayers) % numPlayers;
-      const distB = (b.id - dealerIndex + numPlayers) % numPlayers;
-      return distA - distB;
-    });
-
-    sortedOwls.forEach(owl => {
-      const choice = lookoutActions[owl.id];
-      if (choice) {
-        const target = updatedPlayers.find(p => p.id === choice.targetId);
-        if (target) {
-          const hit = target.selectedAction === choice.declaredCard;
-          target.lookoutRevealed = true;
-          if (hit) {
-            owl.tokens = Math.min(8, owl.tokens + 1);
-            addLog(`🦉 【見張り成功】 ${owl.name} が ${target.name} の 『${ACTION_CARDS[choice.declaredCard].name}』 を的中！ (${owl.name} 影響力+1 -> ${owl.tokens})`);
-          } else {
-            addLog(`🦉 【見張り失敗】 ${owl.name} が ${target.name} に 『${ACTION_CARDS[choice.declaredCard].name}』 を宣言したが不的中 (実際は ${ACTION_CARDS[target.selectedAction].name})。`);
+        if (canUseRole && wantRole) {
+          if (p.role === "owl") {
+            const others = prev.players.filter((o) => o.id !== p.id);
+            if (others.length > 0) {
+              owlTargetId = others[Math.floor(Math.random() * others.length)].id;
+            }
+          }
+          if (p.role === "beaver") {
+            const others = prev.players.filter((o) => o.id !== p.id && p.influence > 0);
+            if (others.length > 0) {
+              beaverTargetId = others[Math.floor(Math.random() * others.length)].id;
+            }
           }
         }
-      }
-    });
 
-    setPlayers(updatedPlayers);
-    proceedToTactician();
-  };
-
-  // Step 4.2 Tactician
-  const proceedToTactician = () => {
-    const tacticians = players.filter(p => p.useRole && !p.coolDownCard && p.role === 'OCTOPUS');
-    if (tacticians.length > 0) {
-      setGameState('STEP4_TACTICIAN');
-      addLog('Step 4.2: 策士（タコ）の能力解決');
-    } else {
-      resolveStep4Reveal();
-    }
-  };
-
-  // Step 4.2 Resolve Tactician
-  const resolveTactician = () => {
-    let updatedPlayers = [...players];
-    const tacticians = updatedPlayers.filter(p => p.useRole && !p.coolDownCard && p.role === 'OCTOPUS');
-
-    tacticians.forEach(tac => {
-      if (tac.selectedAction === 'FOX') {
-        tac.tokens = Math.min(8, tac.tokens + 1);
-        addLog(`🐙 【策士成功】 ${tac.name} はキツネを提出していたためオープン！ 影響力+1 (現在:${tac.tokens})`);
-      } else {
-        addLog(`🐙 【策士不発】 ${tac.name} は策士を公開したが、キツネではなく ${ACTION_CARDS[tac.selectedAction].name} でした。`);
-      }
-    });
-
-    setPlayers(updatedPlayers);
-    resolveStep4Reveal();
-  };
-
-  // Step 4.3 All Reveal & Settlement
-  const resolveStep4Reveal = () => {
-    let updatedPlayers = [...players];
-
-    // Count monkeys & Beavers
-    const monkeysCount = updatedPlayers.filter(p => p.selectedAction === 'MONKEY').length;
-    const beavers = updatedPlayers.filter(p => p.useRole && !p.coolDownCard && p.role === 'BEAVER');
-    const validBeaversCount = Math.min(monkeysCount, beavers.length);
-
-    // Calculate base contribution
-    let rawContribution = 0;
-    updatedPlayers.forEach(p => {
-      rawContribution += ACTION_CARDS[p.selectedAction].contribution;
-    });
-
-    // Beaver adjustment: +2 per valid beaver (cancelling -2 of monkey)
-    const beaverBonus = validBeaversCount * 2;
-    const adjustedContribution = rawContribution + beaverBonus;
-
-    if (beavers.length > 0 && monkeysCount > 0) {
-      addLog(`🦫 【調停者発動】 サル${monkeysCount}枚に対し調停者${validBeaversCount}名が効果発動！ マイナス補正を+${beaverBonus}無効化。`);
-    }
-
-    // Apply Card Influence gains (max 8) & remove used action card from hand
-    updatedPlayers = updatedPlayers.map(p => {
-      const card = ACTION_CARDS[p.selectedAction];
-      const newTokens = Math.min(8, p.tokens + card.influence);
-      const newHand = p.hand.filter((c, idx) => {
-        // remove one instance of selectedAction
-        const firstIdx = p.hand.indexOf(p.selectedAction);
-        return idx !== firstIdx;
-      });
-
-      return {
-        ...p,
-        tokens: newTokens,
-        hand: newHand
-      };
-    });
-
-    setPlayers(updatedPlayers);
-    addLog(`Step 4.3 アクション一斉公開: 基本貢献値 ${rawContribution} (調停者補正後: ${adjustedContribution})`);
-
-    // Check for Carrier (Dove)
-    const doves = updatedPlayers.filter(p => p.useRole && !p.coolDownCard && p.role === 'DOVE');
-    if (doves.length > 0) {
-      const initialCarriers = {};
-      doves.forEach(d => {
-        const defaultTarget = updatedPlayers.find(p => p.id !== d.id)?.id || 0;
-        initialCarriers[d.id] = defaultTarget;
-      });
-      setCarrierTransfers(initialCarriers);
-      setGameState('STEP4_CARRIER');
-      addLog('Step 4.4: 運び屋（ハト）のトークン譲渡');
-    } else {
-      startStep5(monkeysCount);
-    }
-  };
-
-  // Step 4.4 Resolve Carrier
-  const resolveCarrier = () => {
-    let updatedPlayers = [...players];
-    const doves = updatedPlayers.filter(p => p.useRole && !p.coolDownCard && p.role === 'DOVE');
-
-    // Sort order
-    const sortedDoves = [...doves].sort((a, b) => {
-      const distA = (a.id - dealerIndex + numPlayers) % numPlayers;
-      const distB = (b.id - dealerIndex + numPlayers) % numPlayers;
-      return distA - distB;
-    });
-
-    sortedDoves.forEach(dove => {
-      const targetId = carrierTransfers[dove.id];
-      const target = updatedPlayers.find(p => p.id === targetId);
-      if (dove.tokens > 0 && target) {
-        dove.tokens -= 1;
-        target.tokens = Math.min(8, target.tokens + 1);
-        addLog(`🕊️ 【運び屋解決】 ${dove.name} が ${target.name} に影響力トークンを1個譲渡しました。`);
-      } else if (dove.tokens === 0) {
-        addLog(`🕊️ 【運び屋不発】 ${dove.name} は影響力トークンを0個しか持っていないため譲渡できませんでした。`);
-      }
-    });
-
-    setPlayers(updatedPlayers);
-    const monkeysCount = updatedPlayers.filter(p => p.selectedAction === 'MONKEY').length;
-    startStep5(monkeysCount);
-  };
-
-  // Move to Step 5
-  const startStep5 = (monkeysCount) => {
-    setGameState('STEP5');
-    setTimer(60);
-    setIsTimerRunning(true);
-    // Prepare monkey targets array if monkeys played
-    setMonkeyTargets(Array(monkeysCount).fill(0));
-    addLog(`Step 5: 全体相談開始（60秒） ${monkeysCount > 0 ? `※サルが${monkeysCount}枚出ているため多数決で${monkeysCount}名指名` : ''}`);
-  };
-
-  // Resolve Monkey Targets
-  const resolveMonkeyTargets = () => {
-    if (monkeyTargets.length > 0) {
-      let updatedPlayers = [...players];
-      monkeyTargets.forEach((targetId, idx) => {
-        const target = updatedPlayers.find(p => p.id === targetId);
-        if (target && target.tokens > 0) {
-          target.tokens -= 1;
-          addLog(`🐒 【サル指差し多数決 ${idx + 1}回目】 ${target.name} の影響力を-1 (現在:${target.tokens})`);
-        } else if (target) {
-          addLog(`🐒 【サル指差し多数決 ${idx + 1}回目】 ${target.name} が選ばれましたが影響力は既に0でした。`);
-        }
-      });
-      setPlayers(updatedPlayers);
-    }
-    startStep6Vote();
-  };
-
-  // Move to Step 6 Vote
-  const startStep6Vote = () => {
-    setIsTimerRunning(false);
-    setGameState('STEP6_VOTE');
-    addLog('Step 6: 両面トークン投票フェーズ（緑=賛成 / 赤=反対）');
-  };
-
-  // Auto fill votes for testing
-  const autoFillStep6Vote = () => {
-    setPlayers(prev => prev.map(p => {
-      if (p.tokens === 0) {
-        return { ...p, voteColor: 'NONE', voteAmount: 0 };
-      }
-      const choices = ['GREEN', 'RED', 'NONE'];
-      const color = choices[Math.floor(Math.random() * choices.length)];
-      const amount = color === 'NONE' ? 0 : Math.floor(Math.random() * p.tokens) + 1;
-      return {
-        ...p,
-        voteColor: color,
-        voteAmount: amount
-      };
-    }));
-  };
-
-  // Submit Votes and compute result
-  const submitVotes = () => {
-    let greenTotal = 0;
-    let redTotal = 0;
-    let lionCount = 0;
-    let wolfCount = 0;
-
-    let updatedPlayers = [...players];
-
-    updatedPlayers.forEach(p => {
-      if (p.voteColor === 'GREEN' && p.voteAmount > 0) {
-        greenTotal += p.voteAmount;
-        if (p.useRole && !p.coolDownCard && p.role === 'LION') {
-          lionCount++;
-        }
-      } else if (p.voteColor === 'RED' && p.voteAmount > 0) {
-        redTotal += p.voteAmount;
-        if (p.useRole && !p.coolDownCard && p.role === 'WOLF') {
-          wolfCount++;
-        }
-      }
-      // Deduct spent tokens
-      p.tokens = Math.max(0, p.tokens - p.voteAmount);
-    });
-
-    const lionBonus = lionCount * 2;
-    const wolfBonus = wolfCount * 2; // Subtracts 2 from total
-
-    // Calculate card contributions
-    const monkeysCount = updatedPlayers.filter(p => p.selectedAction === 'MONKEY').length;
-    const beavers = updatedPlayers.filter(p => p.useRole && !p.coolDownCard && p.role === 'BEAVER');
-    const validBeaversCount = Math.min(monkeysCount, beavers.length);
-    
-    let rawActionContrib = 0;
-    updatedPlayers.forEach(p => {
-      rawActionContrib += ACTION_CARDS[p.selectedAction].contribution;
-    });
-    const actionContrib = rawActionContrib + (validBeaversCount * 2);
-
-    const netVote = (greenTotal + lionBonus) - (redTotal + wolfBonus);
-    const finalContribution = actionContrib + netVote;
-    const delta = finalContribution - targetValue;
-    const newBalance = balance + delta;
-
-    const calcObj = {
-      actionContrib,
-      greenTotal,
-      lionBonus,
-      redTotal,
-      wolfBonus,
-      netVote,
-      finalContribution,
-      targetValue,
-      delta,
-      newBalance
-    };
-
-    setStep6Calc(calcObj);
-    setBalance(newBalance);
-    setPlayers(updatedPlayers);
-
-    addLog(`Step 6 投票結果: 賛成(緑:${greenTotal} + 熱弁:${lionBonus}) - 反対(赤:${redTotal} + 扇動:${wolfBonus}) = ネット:${netVote}`);
-    addLog(`最終貢献値: ${finalContribution} (目標値: ${targetValue}) -> 天秤移動量: ${delta > 0 ? `+${delta}` : delta} (天秤現在地: ${newBalance})`);
-
-    setGameState('STEP6_RESULT');
-  };
-
-  // Move to Draft & Supply Cleanup
-  const proceedToDraft = () => {
-    let updatedSupply = { ...supply };
-    let updatedPlayers = [...players];
-
-    // 1. Return Elephant/Squirrel played THIS round to supply
-    // 2. Return Fox/Monkey played PREVIOUS round (coolDownCard) to supply
-    updatedPlayers.forEach(p => {
-      if (p.selectedAction === 'ELEPHANT' || p.selectedAction === 'SQUIRREL') {
-        updatedSupply[p.selectedAction] += 1;
-      }
-      if (p.coolDownCard === 'FOX' || p.coolDownCard === 'MONKEY') {
-        updatedSupply[p.coolDownCard] += 1;
-      }
-    });
-
-    // 3. Set new coolDownCard for next round for Fox/Monkey played THIS round
-    updatedPlayers = updatedPlayers.map(p => {
-      const isCoolDown = p.selectedAction === 'FOX' || p.selectedAction === 'MONKEY';
-      return {
-        ...p,
-        coolDownCard: isCoolDown ? p.selectedAction : null
-      };
-    });
-
-    // Determine minority action card played this round
-    const counts = { ELEPHANT: 0, SQUIRREL: 0, FOX: 0, MONKEY: 0 };
-    updatedPlayers.forEach(p => {
-      counts[p.selectedAction] += 1;
-    });
-
-    // Find min count among played actions (>0)
-    let minCount = Infinity;
-    Object.values(counts).forEach(c => {
-      if (c > 0 && c < minCount) minCount = c;
-    });
-
-    const minorityActions = Object.keys(counts).filter(k => counts[k] === minCount && minCount > 0);
-
-    // Identify eligible drafters (who played one of the minority actions)
-    const eligibleDrafters = updatedPlayers.filter(p => minorityActions.includes(p.selectedAction));
-
-    // Sort eligible drafters starting from dealer clockwise
-    eligibleDrafters.sort((a, b) => {
-      const distA = (a.id - dealerIndex + numPlayers) % numPlayers;
-      const distB = (b.id - dealerIndex + numPlayers) % numPlayers;
-      return distA - distB;
-    });
-
-    const queue = eligibleDrafters.map(p => p.id);
-
-    setSupply(updatedSupply);
-    setPlayers(updatedPlayers);
-    setDraftQueue(queue);
-    setCurrentDrafterIndex(0);
-
-    if (queue.length > 0) {
-      setGameState('STEP6_DRAFT');
-      addLog(`サプライ返却・補充開始: 少数派アクション 『${minorityActions.map(a => ACTION_CARDS[a].name).join(', ')}』 のプレイヤー${queue.length}名が補充開始。`);
-    } else {
-      finishRound();
-    }
-  };
-
-  // Perform Draft Selection for current drafter
-  const handleDraftSelect = (cardKey) => {
-    if (supply[cardKey] <= 0) return;
-
-    const drafterId = draftQueue[currentDrafterIndex];
-    
-    // Update Supply
-    setSupply(prev => ({ ...prev, [cardKey]: prev[cardKey] - 1 }));
-
-    // Add card to player hand
-    setPlayers(prev => prev.map(p => {
-      if (p.id === drafterId) {
         return {
           ...p,
-          hand: [...p.hand, cardKey]
+          submittedAction: pickedAction,
+          submittedRole: wantRole,
+          owlTargetId,
+          beaverTargetId,
+        };
+      });
+      return {
+        ...prev,
+        players: nextPlayers,
+        logs: appendLog(prev.logs, "全プレイヤーの提出カード（アクション・任意役職）を自動セットしました。"),
+      };
+    });
+  };
+
+  // Step 4-A: 「見張り（フクロウ）」と「策士（タコ）」の先行解決
+  // 仕様①: アクションカードを回収・一斉公開する前に見張り・策士が先行発動する
+  const handleResolvePreReveal = () => {
+    setGame((prev) => {
+      if (prev.preRevealDone) return prev;
+
+      const working = prev.players.map((p) => ({ ...p }));
+      const messages = [];
+
+      // 1. 見張り（フクロウ）先行解決
+      working.forEach((p) => {
+        const canUse = !p.lockedNextRound && p.submittedRole && p.role === "owl";
+        if (!canUse) return;
+        const target = working.find((t) => t.id === p.owlTargetId);
+        if (!target || target.id === p.id) {
+          messages.push(`🦉見張り(${p.name}): 対象未指定のため不発。`);
+          return;
+        }
+        const isHit = target.submittedAction === p.owlGuessAction;
+        if (isHit) {
+          p.influence = Math.min(8, p.influence + 1);
+        }
+        messages.push(
+          `🦉見張り(${p.name})が表向き: ${target.name} の伏せカードを「${
+            ACTION_META[p.owlGuessAction].shortName
+          }」と宣言 → 単独公開で「${
+            target.submittedAction ? ACTION_META[target.submittedAction].shortName : "なし"
+          }」を確認！${isHit ? "【的中】影響力+1（現" + p.influence + "）" : "【外れ】"}`
+        );
+      });
+
+      // 2. 策士（タコ）先行オープン解決（キツネ提出者がアクションと役職を先行オープンして影響力+1）
+      working.forEach((p) => {
+        const canUse = !p.lockedNextRound && p.submittedRole && p.role === "octopus";
+        if (!canUse) return;
+        if (p.submittedAction === "fox") {
+          p.influence = Math.min(8, p.influence + 1);
+          messages.push(
+            `🐙策士(${p.name})が先行オープン: キツネ提出を確認し、アクション＆役職を公開して影響力+1（現${p.influence}）！`
+          );
+        } else {
+          messages.push(
+            `🐙策士(${p.name})が役職オープン: キツネ未提出のため追加影響力なし。`
+          );
+        }
+      });
+
+      if (messages.length === 0) {
+        messages.push("先行解決（見張り・策士）の対象役職はありませんでした。");
+      }
+
+      return {
+        ...prev,
+        players: working,
+        preRevealDone: true,
+        preRevealSummary: messages,
+        logs: [...prev.logs, ...messages.map((m) => `[R${prev.round}-S4先行] ${m}`)],
+      };
+    });
+  };
+
+  // Step 4-B: 残りのアクションカード一斉公開・基本貢献値・調停者/運び屋・アクション影響力精算
+  const handleResolveActionReveal = () => {
+    setGame((prev) => {
+      if (!prev.preRevealDone || prev.actionRevealDone) return prev;
+
+      const working = prev.players.map((p) => ({ ...p }));
+      const messages = [];
+
+      // 提出漏れがあれば手札先頭を自動補完
+      working.forEach((p) => {
+        if (!p.submittedAction) {
+          p.submittedAction = p.hand[0] || "elephant";
+        }
+      });
+
+      // シャッフルして一斉公開
+      const shuffledOrder = shuffleArray(working.map((p) => p.id));
+      messages.push(
+        `🔀 残りアクション一斉公開順: ${shuffledOrder
+          .map((id) => {
+            const pl = working.find((x) => x.id === id);
+            return `${pl.name}(${ACTION_META[pl.submittedAction].shortName})`;
+          })
+          .join(" → ")}`
+      );
+
+      // 基本貢献値計算
+      let baseContribution = 0;
+      let monkeyCount = 0;
+      working.forEach((p) => {
+        const meta = ACTION_META[p.submittedAction];
+        baseContribution += meta.contribution;
+        if (p.submittedAction === "monkey") monkeyCount += 1;
+      });
+      messages.push(`📊 アクション基本貢献値合計: ${baseContribution >= 0 ? `+${baseContribution}` : baseContribution}`);
+
+      // 運び屋（ハト）: サルが出たとき、表向きにして全体のマイナス補正（-2→0）を1回分無効化
+      let doveNegatedMonkeys = 0;
+      working.forEach((p) => {
+        const canUse = !p.lockedNextRound && p.submittedRole && p.role === "dove";
+        if (canUse && monkeyCount > 0 && doveNegatedMonkeys < monkeyCount) {
+          doveNegatedMonkeys += 1;
+          messages.push(`🕊️運び屋(${p.name})が表向き: サルのマイナス補正(-2→0)を1回分無効化！`);
+        }
+      });
+
+      const effectiveMonkeyPenalty = Math.max(0, monkeyCount - doveNegatedMonkeys) * -2;
+      const actionContribution = baseContribution + monkeyCount * 2 + effectiveMonkeyPenalty;
+      messages.push(
+        `⚖️ サル補正反映後の貢献値: ${actionContribution >= 0 ? `+${actionContribution}` : actionContribution}（サル${monkeyCount}枚 / 無効化${doveNegatedMonkeys}枚）`
+      );
+
+      // 調停者（ビーバー）: 公開直後に表向きにし、他のプレイヤー1人に影響力トークンを1個譲渡
+      working.forEach((p) => {
+        const canUse = !p.lockedNextRound && p.submittedRole && p.role === "beaver";
+        if (!canUse) return;
+        const recipient = working.find((t) => t.id === p.beaverTargetId && t.id !== p.id);
+        if (recipient && p.influence > 0) {
+          p.influence -= 1;
+          recipient.influence = Math.min(8, recipient.influence + 1);
+          messages.push(
+            `🦫調停者(${p.name})が表向き: ${recipient.name} に影響力トークンを1個譲渡（${p.name}:${p.influence} / ${recipient.name}:${recipient.influence}）。`
+          );
+        } else {
+          messages.push(`🦫調停者(${p.name})が表向き: 譲渡対象なしまたはトークン不足のため譲渡なし。`);
+        }
+      });
+
+      // アクションカード分の影響力増減（上限8）
+      working.forEach((p) => {
+        const gain = ACTION_META[p.submittedAction].influence;
+        if (gain !== 0) {
+          const before = p.influence;
+          p.influence = Math.max(0, Math.min(8, p.influence + gain));
+          messages.push(
+            `🪙 ${p.name} アクション影響力 ${gain > 0 ? `+${gain}` : gain}: ${before} → ${p.influence}（上限8）`
+          );
+        }
+      });
+
+      return {
+        ...prev,
+        players: working,
+        actionRevealDone: true,
+        actionRevealSummary: {
+          actionContribution,
+          monkeyCount,
+          doveNegatedMonkeys,
+          messages,
+        },
+        logs: [...prev.logs, ...messages.map((m) => `[R${prev.round}-S4公開] ${m}`)],
+      };
+    });
+  };
+
+  // Step 5: サル指差し多数決（サル枚数分の対象選択をランダム補助）
+  const handleRandomMonkeyTargets = () => {
+    const monkeyCount = game.actionRevealSummary?.monkeyCount || 0;
+    if (monkeyCount <= 0) return;
+    const picks = Array.from({ length: monkeyCount }, () =>
+      Math.floor(Math.random() * game.playerCount)
+    );
+    setGame((prev) => ({
+      ...prev,
+      monkeyPenaltyTargets: picks,
+      logs: appendLog(
+        prev.logs,
+        `🐒 サル指差し対象（${monkeyCount}回分）を自動選択: ${picks.map((id) => `P${id + 1}`).join(", ")}`
+      ),
+    }));
+  };
+
+  // Step 6: 投票ランダム入力
+  const handleRandomizeVotes = () => {
+    setGame((prev) => {
+      const nextPlayers = prev.players.map((p) => {
+        const total = Math.floor(Math.random() * (p.influence + 1));
+        const isGreen = p.faction === "herbivore" ? Math.random() < 0.7 : Math.random() < 0.3;
+        return {
+          ...p,
+          voteGreen: isGreen ? total : 0,
+          voteRed: !isGreen ? total : 0,
+        };
+      });
+      return {
+        ...prev,
+        players: nextPlayers,
+        logs: appendLog(prev.logs, "全プレイヤーの投票トークンをランダムセットしました。"),
+      };
+    });
+  };
+
+  // Step 6 精算＆次ラウンド移行
+  // 仕様②: 投票結果開示後に熱弁家・扇動者を解決し、使用トークン全返却
+  // 仕様③: 少数派アクション選択者のうち親から時計回りで一番近い人を先頭に、時計回りで全員が1枚補充して手札4枚を維持
+  const handleSettleAndAdvanceRound = () => {
+    setGame((prev) => {
+      const n = prev.playerCount;
+      const working = prev.players.map((p) => ({
+        ...p,
+        hand: [...p.hand],
+        heldCards: [...p.heldCards],
+      }));
+      const logs = [...prev.logs];
+
+      // サル指差しペナルティ適用
+      const monkeyCount = prev.actionRevealSummary?.monkeyCount || 0;
+      const targets =
+        prev.monkeyPenaltyTargets.length === monkeyCount
+          ? prev.monkeyPenaltyTargets
+          : Array.from({ length: monkeyCount }, (_, idx) => prev.monkeyPenaltyTargets[idx] ?? 0);
+
+      let monkeyPenaltyTotal = 0;
+      if (monkeyCount > 0) {
+        targets.forEach((tid, idx) => {
+          const target = working.find((x) => x.id === tid);
+          if (target) {
+            target.influence = Math.max(0, target.influence - 1);
+            monkeyPenaltyTotal -= 1;
+            logs.push(
+              `[R${prev.round}-S5] 🐒サル指差し(${idx + 1}/${monkeyCount}回目): ${target.name} の影響力-1（残${target.influence}）`
+            );
+          }
+        });
+      }
+
+      // 投票集計
+      let greenSum = 0;
+      let redSum = 0;
+      let lionBonus = 0;
+      let wolfExtraPenalty = 0;
+
+      working.forEach((p) => {
+        const g = Math.max(0, Math.min(p.influence, p.voteGreen || 0));
+        const r = Math.max(0, Math.min(p.influence - g, p.voteRed || 0));
+        greenSum += g;
+        redSum += r;
+
+        // 投票で使用したトークンは手元から減らし中央サプライへ返却
+        p.influence = Math.max(0, p.influence - (g + r));
+
+        // 熱弁家: 緑（賛成）を1枚以上出したとき +2
+        const canUseRole = !p.lockedNextRound && p.submittedRole;
+        if (canUseRole && p.role === "lion" && g >= 1) {
+          lionBonus += 2;
+          logs.push(`[R${prev.round}-S6] 🦁熱弁家(${p.name})発動: 緑${g}枚投票につき賛成合計+2！`);
+        }
+        // 扇動者: 赤（反対）を1枚以上出したとき、反対合計のマイナス影響をさらに2強化
+        if (canUseRole && p.role === "wolf" && r >= 1) {
+          wolfExtraPenalty += 2;
+          logs.push(`[R${prev.round}-S6] 🐺扇動者(${p.name})発動: 赤${r}枚投票につき反対マイナス影響を+2強化！`);
+        }
+      });
+
+      const effectiveGreen = greenSum + lionBonus;
+      const effectiveRedPenalty = -(redSum + wolfExtraPenalty);
+      const voteDelta = effectiveGreen + effectiveRedPenalty;
+
+      const baseActionContrib = prev.actionRevealSummary?.actionContribution ?? 0;
+      const finalContribution = baseActionContrib + voteDelta;
+      const scaleDelta = finalContribution - prev.target;
+      const nextScale = prev.scale + scaleDelta;
+
+      logs.push(
+        `[R${prev.round}-S6] 🗳️ 投票結果: 緑${greenSum}(+${lionBonus}) vs 赤-${redSum}(-${wolfExtraPenalty}) → 投票補正 ${
+          voteDelta >= 0 ? `+${voteDelta}` : voteDelta
+        } / 最終貢献値 ${finalContribution} vs 目標 ${prev.target} → 天秤 ${
+          scaleDelta >= 0 ? `+${scaleDelta}` : scaleDelta
+        }（現在 ${nextScale}）`
+      );
+
+      // 最も少数派のアクションを特定（同数最小タイはすべて同列少数派）
+      const countsByAction = { elephant: 0, squirrel: 0, fox: 0, monkey: 0 };
+      working.forEach((p) => {
+        const act = p.submittedAction || "elephant";
+        countsByAction[act] += 1;
+      });
+      const minCount = Math.min(...ACTION_TYPES.map((a) => countsByAction[a]));
+      const minorityActions = new Set(ACTION_TYPES.filter((a) => countsByAction[a] === minCount));
+
+      // 最も少数派アクション選択者のうち、今Rの親から時計回りで一番近い人を探す
+      let startDrawIndex = prev.parentIndex;
+      for (let offset = 0; offset < n; offset++) {
+        const idx = (prev.parentIndex + offset) % n;
+        if (minorityActions.has(working[idx].submittedAction)) {
+          startDrawIndex = idx;
+          break;
+        }
+      }
+
+      // サプライ返却と手札からの提出カード除外
+      // 仕様: 今R使用のゾウ・リスと、前Rから手元にあったキツネ・サルを共有サプライへ返却
+      // 今R提出のキツネ・サルはサプライに入れず、各自の前に表向きで残し、次R役職不可にする
+      const nextSupply = { ...prev.supply };
+
+      working.forEach((p) => {
+        // 前ラウンドから手元に置かれていたキツネ・サルをサプライへ返却
+        if (p.heldCards.length > 0) {
+          p.heldCards.forEach((cardId) => {
+            nextSupply[cardId] = (nextSupply[cardId] || 0) + 1;
+          });
+          p.heldCards = [];
+        }
+
+        const act = p.submittedAction || "elephant";
+        // 手札から提出した1枚を除外
+        const cardPos = p.hand.indexOf(act);
+        if (cardPos !== -1) {
+          p.hand.splice(cardPos, 1);
+        }
+
+        if (act === "elephant" || act === "squirrel") {
+          nextSupply[act] = (nextSupply[act] || 0) + 1;
+          p.lockedNextRound = false;
+        } else {
+          // キツネ or サル: 次のラウンド終了時まで手元に表向きで残し、次R役職不可
+          p.heldCards = [act];
+          p.lockedNextRound = true;
+        }
+      });
+
+      // 仕様②修正: 少数派の人を先頭に時計回りで「全プレイヤー」が1枚ずつ補充し、常に4枚を維持
+      const drawOrder = Array.from({ length: n }, (_, k) => (startDrawIndex + k) % n);
+      const drawSummary = [];
+
+      drawOrder.forEach((pIdx) => {
+        const pl = working[pIdx];
+        if (pl.hand.length >= 4) return;
+        const availableAction = ACTION_TYPES.find((a) => (nextSupply[a] || 0) > 0);
+        if (availableAction) {
+          nextSupply[availableAction] -= 1;
+          pl.hand.push(availableAction);
+          drawSummary.push(`${pl.name}←${ACTION_META[availableAction].shortName}`);
+        } else {
+          drawSummary.push(`${pl.name}←(枯渇)`);
+        }
+      });
+
+      logs.push(
+        `[R${prev.round}-S6] 🔄 少数派先頭(${working[startDrawIndex].name})から時計回りで全員1枚補充: ${
+          drawSummary.join(", ") || "なし"
+        }`
+      );
+
+      const roundRecord = {
+        round: prev.round,
+        target: prev.target,
+        baseActionContrib,
+        voteDelta,
+        finalContribution,
+        scaleDelta,
+        scaleAfter: nextScale,
+        monkeyPenaltyTotal,
+      };
+
+      // 最終ラウンド（5R）終了時は次ラウンドへ進まず結果表示
+      if (prev.round >= prev.maxRounds) {
+        return {
+          ...prev,
+          players: working.map((p) => ({
+            ...p,
+            submittedAction: null,
+            submittedRole: false,
+            voteGreen: 0,
+            voteRed: 0,
+          })),
+          supply: nextSupply,
+          scale: nextScale,
+          lastRoundResult: roundRecord,
+          logs: [...logs, `🏁 全5ラウンド終了！最終「森の天秤」は ${nextScale} です。`],
         };
       }
-      return p;
-    }));
 
-    const drafter = players.find(p => p.id === drafterId);
-    addLog(`📦 【カード補充】 ${drafter.name} がサプライから 『${ACTION_CARDS[cardKey].name}』 を1枚手札に補充しました。`);
+      // 次ラウンドへ: 役職回収・シャッフル再配布、親を時計回りに1人進める
+      const nextRound = prev.round + 1;
+      const nextParent = (prev.parentIndex + 1) % n;
+      const redealtRoles = dealRoles(n);
 
-    if (currentDrafterIndex + 1 < draftQueue.length) {
-      setCurrentDrafterIndex(prev => prev + 1);
-    } else {
-      finishRound();
-    }
+      const nextPlayers = working.map((p, idx) => ({
+        ...p,
+        role: redealtRoles[idx],
+        submittedAction: null,
+        submittedRole: false,
+        owlTargetId: null,
+        beaverTargetId: null,
+        voteGreen: 0,
+        voteRed: 0,
+      }));
+
+      const nextTarget = getDefaultTarget(nextRound, n);
+      logs.push(
+        `➡️ 第${nextRound}ラウンド開始！親は ${nextPlayers[nextParent].name}、課題目標値は ${nextTarget} です。`
+      );
+
+      return {
+        ...prev,
+        round: nextRound,
+        step: 1,
+        parentIndex: nextParent,
+        scale: nextScale,
+        target: nextTarget,
+        supply: nextSupply,
+        negotiationSubPhase: "right",
+        negotiationSeconds: 60,
+        preRevealDone: false,
+        preRevealSummary: null,
+        actionRevealDone: false,
+        actionRevealSummary: null,
+        monkeyPenaltyTargets: [],
+        votingDone: false,
+        lastRoundResult: roundRecord,
+        players: nextPlayers,
+        logs,
+      };
+    });
   };
 
-  // Finish Round and check Game Over or proceed to next Round
-  const finishRound = () => {
-    if (round >= 5) {
-      setGameState('GAME_OVER');
-      const winMin = activeConfig.winZone[0];
-      const winMax = activeConfig.winZone[1];
-      const isHerbivoreWin = balance >= winMin && balance <= winMax;
-      addLog(`=== 全5ラウンド終了！ 最終天秤位置: ${balance} ===`);
-      addLog(isHerbivoreWin ? '🏆 【草食陣営『実り豊かな森』の勝利！】' : '🏆 【肉食陣営『飢えと飽和の荒れ野』の勝利！】');
-      return;
-    }
+  // 勝敗判定
+  const isFinished = game.round === game.maxRounds && !!game.lastRoundResult;
+  const herbivoreWins = game.scale >= config.herbMin && game.scale <= config.herbMax;
 
-    // Prepare next round
-    const nextRound = round + 1;
-    const nextDealer = (dealerIndex + 1) % numPlayers;
+  // 天秤ゲージ位置（-15〜+20の範囲を0〜100%へマップ）
+  const gaugeMin = -15;
+  const gaugeMax = Math.max(20, config.herbMax + 5);
+  const scalePercent = Math.max(
+    0,
+    Math.min(100, ((game.scale - gaugeMin) / (gaugeMax - gaugeMin)) * 100)
+  );
+  const herbStartPercent = Math.max(
+    0,
+    Math.min(100, ((config.herbMin - gaugeMin) / (gaugeMax - gaugeMin)) * 100)
+  );
+  const herbEndPercent = Math.max(
+    0,
+    Math.min(100, ((config.herbMax - gaugeMin) / (gaugeMax - gaugeMin)) * 100)
+  );
 
-    // Reshuffle and redistribute roles
-    let rolePool = shuffle([...activeConfig.roles]);
-    const updatedPlayers = players.map((p, idx) => ({
-      ...p,
-      role: rolePool[idx],
-      selectedAction: null,
-      useRole: false,
-      lookoutRevealed: false,
-      voteColor: 'NONE',
-      voteAmount: 0
-    }));
-
-    setPlayers(updatedPlayers);
-    setRound(nextRound);
-    setDealerIndex(nextDealer);
-    setTargetValue(getTargetValue(nextRound, numPlayers));
-    setGameState('STEP1');
-
-    addLog(`=== 第${nextRound}ラウンドへ突入 (親: P${nextDealer + 1}) 役職再配布完了 ===`);
-  };
-
-  // Game Victory Status Info
-  const victoryInfo = useMemo(() => {
-    const winMin = activeConfig.winZone[0];
-    const winMax = activeConfig.winZone[1];
-    const isHerbivoreWin = balance >= winMin && balance <= winMax;
-    return {
-      winMin,
-      winMax,
-      isHerbivoreWin
-    };
-  }, [activeConfig, balance]);
+  const greenTotal = game.players.reduce((acc, p) => acc + (p.voteGreen || 0), 0);
+  const redTotal = game.players.reduce((acc, p) => acc + (p.voteRed || 0), 0);
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 font-sans p-2 sm:p-4 md:p-6">
-      {/* HEADER SECTION */}
-      <header className="max-w-7xl mx-auto bg-slate-800/90 border border-slate-700 rounded-xl p-4 mb-4 shadow-xl backdrop-blur-md">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-emerald-600 rounded-lg shadow-inner">
-              <Shield className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold tracking-wide text-emerald-400 flex items-center gap-2">
-                『森の会議』 ボードゲーム検証・シミュレータ
-                <span className="text-xs font-normal px-2 py-0.5 bg-slate-700 text-slate-300 rounded-full border border-slate-600">
-                  確定仕様書 Ver2.0
-                </span>
+    <div className="min-h-screen bg-slate-100 text-slate-900 p-4 md:p-6">
+      <div className="max-w-7xl mx-auto space-y-5">
+        {/* ヘッダー＆セットアップ */}
+        <header className="bg-white rounded-xl border border-slate-300 p-4 shadow-sm flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <Scale className="w-6 h-6 text-emerald-700" />
+              <h1 className="text-xl md:text-2xl font-bold tracking-tight">
+                『森の会議』ボードゲーム検証・シミュレータ（修正版）
               </h1>
-              <p className="text-xs text-slate-400">1台で5〜15人分を操作可能・ルール自動精算機能付き</p>
             </div>
+            <p className="text-xs md:text-sm text-slate-600 mt-1">
+              1台で5〜15人分を操作可能 ・ 見張り/策士先行解決＆少数派先頭時計回り全員1枚補充 反映済
+            </p>
           </div>
 
-          {/* Top Bar Stats */}
-          {gameState !== 'SETUP' && (
-            <div className="flex flex-wrap items-center gap-3 text-xs md:text-sm">
-              <div className="bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-700">
-                <span className="text-slate-400">ラウンド:</span> <strong className="text-amber-400">{round} / 5</strong>
-              </div>
-              <div className="bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-700">
-                <span className="text-slate-400">親(スタピ):</span> <strong className="text-emerald-400">P{dealerIndex + 1}</strong>
-              </div>
-              <div className="bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-700">
-                <span className="text-slate-400">課題目標値:</span> <strong className="text-blue-400">{targetValue}</strong>
-              </div>
-              <button
-                onClick={() => setDebugMode(!debugMode)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition ${
-                  debugMode ? 'bg-amber-500/20 text-amber-300 border-amber-500/50' : 'bg-slate-700 text-slate-300 border-slate-600'
-                }`}
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1.5 text-sm font-medium bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-300">
+              <Users className="w-4 h-4 text-slate-700" />
+              <span>人数:</span>
+              <select
+                value={setupCount}
+                onChange={(e) => setSetupCount(Number(e.target.value))}
+                className="bg-white border border-slate-300 rounded px-2 py-0.5 font-semibold"
               >
-                {debugMode ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-                {debugMode ? 'GM視点 (全表示中)' : 'プレイヤー視点'}
-              </button>
-            </div>
-          )}
-        </div>
+                {Array.from({ length: 11 }, (_, i) => i + 5).map((num) => (
+                  <option key={num} value={num}>
+                    {num}人
+                  </option>
+                ))}
+              </select>
+            </label>
 
-        {/* BALANCE & WIN ZONE GAUGE */}
-        {gameState !== 'SETUP' && (
-          <div className="mt-4 pt-3 border-t border-slate-700/80">
-            <div className="flex justify-between items-center mb-1.5 text-xs font-medium">
-              <span className="text-red-400 flex items-center gap-1">
-                🥩 肉食領域 (0以下)
-              </span>
-              <span className="text-slate-300 font-bold text-sm">
-                森の天秤: <span className="text-emerald-400 text-base">{balance}</span>
-              </span>
-              <span className="text-red-400 flex items-center gap-1">
-                肉食領域 ({victoryInfo.winMax + 1}以上) 🥩
-              </span>
-            </div>
-            
-            {/* Visual Balance Bar */}
-            <div className="relative w-full h-5 bg-slate-950 rounded-full border border-slate-700 overflow-hidden flex">
-              {/* Carnivore Left Zone */}
-              <div className="h-full bg-red-950/60 border-r border-red-800/40 text-[10px] text-red-400 flex items-center justify-center font-bold" style={{ width: '25%' }}>
-                肉食勝利 (0以下)
-              </div>
-              {/* Herbivore Win Zone */}
-              <div className="h-full bg-emerald-900/60 border-r border-emerald-500/40 text-[10px] text-emerald-300 flex items-center justify-center font-bold" style={{ width: '50%' }}>
-                🌿 草食勝利ゾーン (+1 〜 +{victoryInfo.winMax})
-              </div>
-              {/* Carnivore Right Zone */}
-              <div className="h-full bg-red-950/60 text-[10px] text-red-400 flex items-center justify-center font-bold" style={{ width: '25%' }}>
-                肉食勝利 ({victoryInfo.winMax + 1}〜)
-              </div>
-            </div>
+            <button
+              onClick={() => handleReset(setupCount)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-medium cursor-pointer"
+            >
+              <RotateCcw className="w-4 h-4" />
+              リセット開始
+            </button>
 
-            {/* Supply Bar */}
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400 bg-slate-900/60 p-2 rounded-lg">
-              <span className="font-semibold text-slate-300 flex items-center gap-1">
-                <Layers className="w-3.5 h-3.5 text-amber-400" /> 中央サプライ予備ストック:
-              </span>
-              <div className="flex gap-4">
-                <span>🐘 ゾウ: <strong className="text-slate-200">{supply.ELEPHANT}</strong></span>
-                <span>🐿️ リス: <strong className="text-slate-200">{supply.SQUIRREL}</strong></span>
-                <span>🦊 キツネ: <strong className="text-slate-200">{supply.FOX}</strong></span>
-                <span>🐒 サル: <strong className="text-slate-200">{supply.MONKEY}</strong></span>
+            <button
+              onClick={() => setGmView((v) => !v)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border cursor-pointer ${
+                gmView
+                  ? "bg-amber-100 border-amber-400 text-amber-950"
+                  : "bg-slate-800 border-slate-800 text-white"
+              }`}
+            >
+              {gmView ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+              {gmView ? "GM視点（全情報表示）" : "プレイヤー視点（秘匿表示）"}
+            </button>
+          </div>
+        </header>
+
+        {/* ステータス＆森の天秤バー */}
+        <section className="bg-white rounded-xl border border-slate-300 p-4 shadow-sm space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+              <div className="text-xs text-slate-500">ラウンド / ステップ</div>
+              <div className="text-lg font-bold mt-0.5">
+                R{game.round} / {game.maxRounds} <span className="text-emerald-700">Step {game.step}</span>
               </div>
+            </div>
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+              <div className="text-xs text-slate-500">現在の親（時計回り交代）</div>
+              <div className="text-lg font-bold mt-0.5">
+                👑 {game.players[game.parentIndex]?.name}（席#{game.parentIndex + 1}）
+              </div>
+            </div>
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+              <div className="text-xs text-slate-500">今回の課題目標値</div>
+              <div className="text-lg font-bold mt-0.5 text-indigo-700">{game.target}</div>
+            </div>
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+              <div className="text-xs text-slate-500">森の天秤 現在位置</div>
+              <div className="text-lg font-bold mt-0.5">
+                {game.scale > 0 ? `+${game.scale}` : game.scale}
+              </div>
+            </div>
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 col-span-2 md:col-span-1">
+              <div className="text-xs text-slate-500">草食勝利ゾーン（H={config.herb}）</div>
+              <div className="text-sm font-bold mt-1 text-emerald-800">{config.winText}</div>
             </div>
           </div>
+
+          {/* 天秤ゲージ */}
+          <div>
+            <div className="flex justify-between text-xs font-medium text-slate-600 mb-1">
+              <span>🍖 肉食領域（{gaugeMin}〜{config.herbMin - 1}）</span>
+              <span className="text-emerald-700 font-bold">
+                🌿 草食勝利ゾーン（+{config.herbMin}〜+{config.herbMax}）
+              </span>
+              <span>🍖 肉食過剰領域（+{config.herbMax + 1}〜+{gaugeMax}）</span>
+            </div>
+            <div className="relative h-7 bg-rose-100 border border-slate-300 rounded-full overflow-hidden">
+              <div
+                className="absolute top-0 bottom-0 bg-emerald-200 border-x border-emerald-500"
+                style={{
+                  left: `${herbStartPercent}%`,
+                  width: `${Math.max(2, herbEndPercent - herbStartPercent)}%`,
+                }}
+              />
+              <div
+                className="absolute top-0 bottom-0 w-1.5 bg-slate-900 transition-all duration-300"
+                style={{ left: `calc(${scalePercent}% - 3px)` }}
+                title={`現在: ${game.scale}`}
+              />
+            </div>
+          </div>
+
+          {/* 中央サプライ予備ストック */}
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200 text-sm">
+            <div className="flex items-center gap-2 font-semibold text-slate-700">
+              <Layers className="w-4 h-4 text-slate-600" />
+              <span>中央補充サプライ予備:</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {ACTION_TYPES.map((actId) => {
+                const m = ACTION_META[actId];
+                return (
+                  <span
+                    key={actId}
+                    className="px-2.5 py-1 rounded-md bg-slate-100 border border-slate-300 text-xs font-semibold"
+                  >
+                    {m.emoji} {m.shortName}: <strong>{game.supply[actId] ?? 0}</strong>枚
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+
+        {/* 最終結果バナー */}
+        {isFinished && (
+          <section
+            className={`rounded-xl border-2 p-5 shadow-sm ${
+              herbivoreWins
+                ? "bg-emerald-50 border-emerald-500 text-emerald-950"
+                : "bg-rose-50 border-rose-500 text-rose-950"
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <Award className="w-8 h-8 shrink-0" />
+              <div>
+                <h2 className="text-xl font-bold">
+                  第5ラウンド終了 — {herbivoreWins ? "🌿 草食陣営『実り豊かな森』の勝利！" : "🍖 肉食陣営『飢えと飽和の荒れ野』の勝利！"}
+                </h2>
+                <p className="text-sm mt-1">
+                  最終天秤位置: <strong>{game.scale > 0 ? `+${game.scale}` : game.scale}</strong> / 草食勝利条件:{" "}
+                  <strong>{config.winText}</strong>
+                </p>
+              </div>
+            </div>
+          </section>
         )}
-      </header>
 
-      {/* MAIN CONTENT AREA */}
-      <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-        {/* LEFT 2 COLUMNS: GAME STEP CONTROLLER & PLAYERS GRID */}
-        <div className="lg:col-span-2 space-y-6">
-
-          {/* SETUP SCREEN */}
-          {gameState === 'SETUP' && (
-            <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg text-center">
-              <h2 className="text-2xl font-bold text-emerald-400 mb-2">ゲームセットアップ</h2>
-              <p className="text-slate-400 text-sm mb-6">プレイ人数を選択して検証ゲームを開始します（5人〜15人対応）</p>
-
-              <div className="max-w-xs mx-auto mb-6">
-                <label className="block text-xs font-semibold text-slate-300 mb-2">プレイヤー人数を選択</label>
-                <select
-                  value={numPlayers}
-                  onChange={(e) => setNumPlayers(parseInt(e.target.value))}
-                  className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2.5 text-lg font-bold text-center text-emerald-400 focus:outline-none focus:border-emerald-500"
+        {/* メイン進行パネル（Step 1〜6） */}
+        <section className="bg-white rounded-xl border border-slate-300 p-4 md:p-5 shadow-sm space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
+            <div className="flex flex-wrap gap-1.5">
+              {[1, 2, 3, 4, 5, 6].map((st) => (
+                <button
+                  key={st}
+                  onClick={() => setGame((prev) => ({ ...prev, step: st }))}
+                  className={`px-3 py-1.5 rounded-lg text-xs md:text-sm font-semibold cursor-pointer ${
+                    game.step === st
+                      ? "bg-slate-900 text-white"
+                      : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                  }`}
                 >
-                  {[5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].map(n => (
-                    <option key={n} value={n}>{n} 人プレイ</option>
-                  ))}
-                </select>
-              </div>
+                  Step {st}
+                </button>
+              ))}
+            </div>
 
-              {/* Player Configuration Summary Card */}
-              <div className="bg-slate-900/80 border border-slate-700 rounded-lg p-4 text-left max-w-md mx-auto mb-6 space-y-2 text-xs">
-                <div className="flex justify-between border-b border-slate-800 pb-1.5">
-                  <span className="text-slate-400">陣営構成:</span>
-                  <span className="font-bold text-slate-200">
-                    草食 {activeConfig.herbivores}人 🌿 / 肉食 {activeConfig.carnivores}人 🍖
-                  </span>
-                </div>
-                <div className="flex justify-between border-b border-slate-800 pb-1.5">
-                  <span className="text-slate-400">草食勝利ゾーン:</span>
-                  <span className="font-bold text-emerald-400">
-                    +1 〜 +{activeConfig.winZone[1]}
-                  </span>
-                </div>
-                <div className="flex justify-between border-b border-slate-800 pb-1.5">
-                  <span className="text-slate-400">初期サプライ予備計:</span>
-                  <span className="font-bold text-amber-400">
-                    {activeConfig.supply.ELEPHANT + activeConfig.supply.SQUIRREL + activeConfig.supply.FOX + activeConfig.supply.MONKEY} 枚
-                  </span>
-                </div>
-                <div>
-                  <span className="text-slate-400 block mb-1">使用役職カード:</span>
-                  <div className="flex flex-wrap gap-1">
-                    {activeConfig.roles.map((r, idx) => (
-                      <span key={idx} className="bg-slate-800 border border-slate-700 px-1.5 py-0.5 rounded text-[11px] text-slate-300">
-                        {ROLES[r].animal}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
+            {game.step < 6 && (
               <button
-                onClick={initGame}
-                className="w-full max-w-md bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-6 rounded-lg transition shadow-lg flex items-center justify-center gap-2 mx-auto"
+                onClick={() => setGame((prev) => ({ ...prev, step: Math.min(6, prev.step + 1) }))}
+                className="flex items-center gap-1 px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold cursor-pointer"
               >
-                <Play className="w-5 h-5 fill-current" /> 検証ゲームを開始する
+                <span>次へ: Step {game.step + 1}</span>
+                <ChevronRight className="w-4 h-4" />
               </button>
+            )}
+          </div>
+
+          {/* Step 1: 課題公開 */}
+          {game.step === 1 && (
+            <div className="space-y-3">
+              <h2 className="text-lg font-bold">Step 1: 課題目標値の公開</h2>
+              <p className="text-sm text-slate-600">
+                第{game.round}ラウンドの基準目標値は <strong>{game.target}</strong> です（必要に応じて微調整可能）。
+              </p>
+              <div className="flex items-center gap-3">
+                <label className="text-sm font-medium">目標値調整:</label>
+                <input
+                  type="number"
+                  value={game.target}
+                  onChange={(e) =>
+                    setGame((prev) => ({ ...prev, target: Number(e.target.value) || 0 }))
+                  }
+                  className="w-24 border border-slate-300 rounded-lg px-3 py-1.5 font-bold"
+                />
+              </div>
             </div>
           )}
 
-          {/* STEP CONTROLLER CONTAINER */}
-          {gameState !== 'SETUP' && gameState !== 'GAME_OVER' && (
-            <div className="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-lg">
-              
-              {/* STEP 1 */}
-              {gameState === 'STEP1' && (
+          {/* Step 2: 隣接交渉 */}
+          {game.step === 2 && (
+            <div className="space-y-3">
+              <h2 className="text-lg font-bold flex items-center gap-2">
+                <MessageSquare className="w-5 h-5 text-emerald-700" />
+                Step 2: 隣接交渉（右隣1分 → 左隣1分）
+              </h2>
+              <p className="text-sm text-slate-600">
+                口頭での約束・推測・ブラフは自由。陣営カード・手札・未公開役職の現物提示は禁止です。
+              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  onClick={() =>
+                    setGame((prev) => ({
+                      ...prev,
+                      negotiationSubPhase: prev.negotiationSubPhase === "right" ? "left" : "right",
+                    }))
+                  }
+                  className="px-3.5 py-1.5 rounded-lg bg-amber-100 border border-amber-400 text-amber-950 text-sm font-semibold cursor-pointer"
+                >
+                  現在: {game.negotiationSubPhase === "right" ? "👉 右隣交渉フェーズ" : "👈 左隣交渉フェーズ"}（切替）
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: 同時裏向き提出 */}
+          {game.step === 3 && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-lg font-bold text-emerald-400 flex items-center gap-2">
-                      <span className="bg-emerald-500/20 text-emerald-400 text-xs px-2 py-0.5 rounded-full border border-emerald-500/30">Step 1</span>
-                      課題目標値の公開
-                    </h3>
-                  </div>
-                  <p className="text-xs text-slate-300 mb-4">
-                    第{round}ラウンドの目標値は <strong className="text-blue-400 text-sm">{targetValue}</strong> です。（手動変更も可能）
+                  <h2 className="text-lg font-bold">Step 3: 同時裏向き提出</h2>
+                  <p className="text-sm text-slate-600">
+                    各プレイヤーがアクション1枚を選択し、役職使用可能（前Rキツネ/サル留置中でない）な人は役職発動の有無も設定します。
                   </p>
-                  <div className="flex items-center gap-3 mb-4">
-                    <label className="text-xs text-slate-400">目標値微調整:</label>
-                    <input
-                      type="number"
-                      value={targetValue}
-                      onChange={(e) => setTargetValue(parseInt(e.target.value) || 0)}
-                      className="w-20 bg-slate-900 border border-slate-600 rounded px-2 py-1 text-center font-bold text-blue-400"
-                    />
-                  </div>
+                </div>
+                <button
+                  onClick={handleRandomizeSubmissions}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold cursor-pointer"
+                >
+                  <Shuffle className="w-4 h-4" />
+                  全員ランダム提出
+                </button>
+              </div>
+
+              <div className="text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                提出完了状況:{" "}
+                <strong>
+                  {game.players.filter((p) => !!p.submittedAction).length} / {game.playerCount}人
+                </strong>
+                （下のプレイヤー一覧または個別操作パネルから選択できます）
+              </div>
+            </div>
+          )}
+
+          {/* Step 4: 公開＆役職解決（見張り・策士を先行解決 → 残り一斉公開・調停者/運び屋） */}
+          {game.step === 4 && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-lg font-bold">Step 4: 公開＆役職解決</h2>
+                  <p className="text-sm text-slate-600">
+                    ①<strong>見張り・策士を先行解決</strong>してから、②<strong>残りアクション一斉公開・調停者・運び屋・影響力精算</strong>を行います。
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
                   <button
-                    onClick={startStep2}
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2 rounded-lg text-sm transition flex items-center gap-1.5"
+                    onClick={handleResolvePreReveal}
+                    disabled={game.preRevealDone}
+                    className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer ${
+                      game.preRevealDone
+                        ? "bg-slate-200 text-slate-500 cursor-not-allowed"
+                        : "bg-amber-600 hover:bg-amber-700 text-white"
+                    }`}
                   >
-                    次へ: Step 2 隣接交渉 <ArrowRight className="w-4 h-4" />
+                    <Sparkles className="w-4 h-4" />
+                    ① 見張り・策士を先行解決
+                  </button>
+
+                  <button
+                    onClick={handleResolveActionReveal}
+                    disabled={!game.preRevealDone || game.actionRevealDone}
+                    className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer ${
+                      !game.preRevealDone || game.actionRevealDone
+                        ? "bg-slate-200 text-slate-500 cursor-not-allowed"
+                        : "bg-emerald-700 hover:bg-emerald-800 text-white"
+                    }`}
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    ② 残り一斉公開＆精算
                   </button>
                 </div>
-              )}
+              </div>
 
-              {/* STEP 2 */}
-              {gameState === 'STEP2' && (
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-lg font-bold text-emerald-400 flex items-center gap-2">
-                      <span className="bg-emerald-500/20 text-emerald-400 text-xs px-2 py-0.5 rounded-full border border-emerald-500/30">Step 2</span>
-                      隣接交渉フェーズ ({timerPhase === 'RIGHT' ? '右隣と交渉中' : '左隣と交渉中'})
-                    </h3>
-                    <div className="flex items-center gap-2 bg-slate-900 px-3 py-1 rounded-lg border border-slate-700 text-amber-400 font-mono font-bold text-base">
-                      <Clock className="w-4 h-4" /> {timer}秒
+              {game.preRevealSummary && (
+                <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 space-y-1">
+                  <div className="text-xs font-bold text-amber-900">【先行解決（見張り・策士）結果】</div>
+                  {game.preRevealSummary.map((line, i) => (
+                    <div key={i} className="text-sm text-amber-950">
+                      {line}
                     </div>
-                  </div>
-                  <p className="text-xs text-slate-300 mb-4">
-                    口頭交渉・約束・ブラフは自由です。（※現物カードの提示は禁止）
-                  </p>
-                  <div className="flex gap-2">
+                  ))}
+                </div>
+              )}
+
+              {game.actionRevealSummary && (
+                <div className="bg-emerald-50 border border-emerald-300 rounded-lg p-3 space-y-1">
+                  <div className="text-xs font-bold text-emerald-900">【一斉公開・調停者/運び屋 結果】</div>
+                  {game.actionRevealSummary.messages.map((line, i) => (
+                    <div key={i} className="text-sm text-emerald-950">
+                      {line}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Step 5: 全体相談＆サル指差し多数決 */}
+          {game.step === 5 && (
+            <div className="space-y-3">
+              <h2 className="text-lg font-bold flex items-center gap-2">
+                <ShieldAlert className="w-5 h-5 text-rose-600" />
+                Step 5: 全体相談（60秒）＆ サル指差し多数決
+              </h2>
+              <p className="text-sm text-slate-600">
+                全体で議論後、今ラウンドでサルが出た枚数（<strong>{game.actionRevealSummary?.monkeyCount || 0}枚</strong>）だけ、指差し多数決で対象1人の影響力を-1します（同一人物が複数回選ばれることもあります）。
+              </p>
+
+              {(game.actionRevealSummary?.monkeyCount || 0) > 0 ? (
+                <div className="space-y-2 bg-rose-50 border border-rose-200 rounded-lg p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-bold text-rose-900">
+                      サル指差し対象（{game.actionRevealSummary.monkeyCount}回分）
+                    </span>
                     <button
-                      onClick={() => setIsTimerRunning(!isTimerRunning)}
-                      className="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold px-3 py-1.5 rounded text-xs"
+                      onClick={handleRandomMonkeyTargets}
+                      className="px-3 py-1 rounded bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold cursor-pointer"
                     >
-                      {isTimerRunning ? '一時停止' : '再開'}
-                    </button>
-                    <button
-                      onClick={startStep3}
-                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-1.5 rounded text-xs transition flex items-center gap-1"
-                    >
-                      交渉終了・次へ: Step 3 同時提出 <ArrowRight className="w-3.5 h-3.5" />
+                      ランダム指名
                     </button>
                   </div>
-                </div>
-              )}
-
-              {/* STEP 3 */}
-              {gameState === 'STEP3' && (
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-lg font-bold text-emerald-400 flex items-center gap-2">
-                      <span className="bg-emerald-500/20 text-emerald-400 text-xs px-2 py-0.5 rounded-full border border-emerald-500/30">Step 3</span>
-                      同時裏向き提出
-                    </h3>
-                    <button
-                      onClick={autoFillStep3}
-                      className="bg-purple-600/30 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40 text-xs font-semibold px-3 py-1 rounded-lg flex items-center gap-1 transition"
-                    >
-                      <Dices className="w-3.5 h-3.5" /> ランダム一括入力
-                    </button>
-                  </div>
-                  <p className="text-xs text-slate-300 mb-4">
-                    下のプレイヤー一覧テーブルにて、各プレイヤーが伏せて出す「アクションカード」と「役職の使用有無」を選択してください。
-                  </p>
-                  <button
-                    onClick={submitStep3}
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-5 py-2 rounded-lg text-sm transition flex items-center gap-2 shadow-lg"
-                  >
-                    全員のカード提出を確定し Step 4 公開フェーズへ <ArrowRight className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
-
-              {/* STEP 4.1 LOOKOUT */}
-              {gameState === 'STEP4_LOOKOUT' && (
-                <div>
-                  <h3 className="text-lg font-bold text-amber-400 mb-2 flex items-center gap-2">
-                    <span>🦉</span> Step 4.1: 見張り（フクロウ）の能力発動
-                  </h3>
-                  <p className="text-xs text-slate-300 mb-4">
-                    他者1人とカード種（ゾウ/リス/キツネ/サル）を宣言し、伏せアクションを公開させます。的中すれば影響力+1。
-                  </p>
-
-                  <div className="space-y-3 mb-4">
-                    {players.filter(p => p.useRole && !p.coolDownCard && p.role === 'OWL').map(owl => (
-                      <div key={owl.id} className="bg-slate-900 p-3 rounded-lg border border-slate-700 flex flex-wrap items-center gap-3 text-xs">
-                        <span className="font-bold text-amber-300">🦉 {owl.name} の宣言:</span>
-                        
-                        <div className="flex items-center gap-1">
-                          <label className="text-slate-400">対象:</label>
-                          <select
-                            value={lookoutActions[owl.id]?.targetId || 0}
-                            onChange={(e) => {
-                              const val = parseInt(e.target.value);
-                              setLookoutActions(prev => ({ ...prev, [owl.id]: { ...prev[owl.id], targetId: val } }));
-                            }}
-                            className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-slate-200"
-                          >
-                            {players.filter(p => p.id !== owl.id).map(p => (
-                              <option key={p.id} value={p.id}>{p.name}</option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div className="flex items-center gap-1">
-                          <label className="text-slate-400">宣言カード:</label>
-                          <select
-                            value={lookoutActions[owl.id]?.declaredCard || 'ELEPHANT'}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setLookoutActions(prev => ({ ...prev, [owl.id]: { ...prev[owl.id], declaredCard: val } }));
-                            }}
-                            className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-slate-200"
-                          >
-                            {Object.keys(ACTION_CARDS).map(k => (
-                              <option key={k} value={k}>{ACTION_CARDS[k].name}</option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <button
-                    onClick={resolveLookout}
-                    className="bg-amber-600 hover:bg-amber-500 text-white font-bold px-4 py-2 rounded-lg text-sm transition"
-                  >
-                    見張りの結果を判定・進行
-                  </button>
-                </div>
-              )}
-
-              {/* STEP 4.2 TACTICIAN */}
-              {gameState === 'STEP4_TACTICIAN' && (
-                <div>
-                  <h3 className="text-lg font-bold text-purple-400 mb-2 flex items-center gap-2">
-                    <span>🐙</span> Step 4.2: 策士（タコ）のオープン
-                  </h3>
-                  <p className="text-xs text-slate-300 mb-4">
-                    策士を出したプレイヤーが自らオープンします。キツネを出していた場合のみ影響力+1を獲得します。
-                  </p>
-                  <button
-                    onClick={resolveTactician}
-                    className="bg-purple-600 hover:bg-purple-500 text-white font-bold px-4 py-2 rounded-lg text-sm transition"
-                  >
-                    策士をオープンし次へ
-                  </button>
-                </div>
-              )}
-
-              {/* STEP 4.4 CARRIER */}
-              {gameState === 'STEP4_CARRIER' && (
-                <div>
-                  <h3 className="text-lg font-bold text-blue-400 mb-2 flex items-center gap-2">
-                    <span>🕊️</span> Step 4.4: 運び屋（ハト）のトークン譲渡
-                  </h3>
-                  <p className="text-xs text-slate-300 mb-4">
-                    全員のアクション公開後、運び屋を出したプレイヤーは自分の影響力トークン1個を指名した1人に譲渡します。
-                  </p>
-
-                  <div className="space-y-3 mb-4">
-                    {players.filter(p => p.useRole && !p.coolDownCard && p.role === 'DOVE').map(dove => (
-                      <div key={dove.id} className="bg-slate-900 p-3 rounded-lg border border-slate-700 flex items-center gap-3 text-xs">
-                        <span className="font-bold text-blue-300">🕊️ {dove.name} (所持:{dove.tokens}個) から譲渡する対象:</span>
+                  <div className="flex flex-wrap gap-3">
+                    {Array.from({ length: game.actionRevealSummary.monkeyCount }).map((_, idx) => (
+                      <label key={idx} className="flex items-center gap-1.5 text-sm">
+                        <span>#{idx + 1}回目:</span>
                         <select
-                          value={carrierTransfers[dove.id] || 0}
+                          value={game.monkeyPenaltyTargets[idx] ?? 0}
                           onChange={(e) => {
-                            const val = parseInt(e.target.value);
-                            setCarrierTransfers(prev => ({ ...prev, [dove.id]: val }));
+                            const val = Number(e.target.value);
+                            setGame((prev) => {
+                              const next = [...prev.monkeyPenaltyTargets];
+                              next[idx] = val;
+                              return { ...prev, monkeyPenaltyTargets: next };
+                            });
                           }}
-                          className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-slate-200"
+                          className="border border-rose-300 bg-white rounded px-2 py-1"
                         >
-                          {players.filter(p => p.id !== dove.id).map(p => (
-                            <option key={p.id} value={p.id}>{p.name} (現在:{p.tokens}個)</option>
+                          {game.players.map((pl) => (
+                            <option key={pl.id} value={pl.id}>
+                              {pl.name}（現影響力: {pl.influence}）
+                            </option>
                           ))}
                         </select>
-                      </div>
+                      </label>
                     ))}
                   </div>
-
-                  <button
-                    onClick={resolveCarrier}
-                    className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded-lg text-sm transition"
-                  >
-                    譲渡を確定し Step 5 へ進む
-                  </button>
-                </div>
-              )}
-
-              {/* STEP 5 */}
-              {gameState === 'STEP5' && (
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-lg font-bold text-emerald-400 flex items-center gap-2">
-                      <span className="bg-emerald-500/20 text-emerald-400 text-xs px-2 py-0.5 rounded-full border border-emerald-500/30">Step 5</span>
-                      全体相談 (60秒) & サル指差し多数決
-                    </h3>
-                    <div className="flex items-center gap-2 bg-slate-900 px-3 py-1 rounded-lg border border-slate-700 text-amber-400 font-mono font-bold text-base">
-                      <Clock className="w-4 h-4" /> {timer}秒
-                    </div>
-                  </div>
-
-                  {monkeyTargets.length > 0 ? (
-                    <div className="bg-slate-900 p-3 rounded-lg border border-red-500/40 mb-4 space-y-2">
-                      <span className="text-xs font-bold text-red-400 block">
-                        🐒 【サル撹乱】 このラウンドでサルが {monkeyTargets.length} 枚提出されました！ 多数決で指名するプレイヤーを{monkeyTargets.length}人分選んでください (影響力-1)
-                      </span>
-                      {monkeyTargets.map((tId, idx) => (
-                        <div key={idx} className="flex items-center gap-2 text-xs">
-                          <span className="text-slate-400 font-semibold">{idx + 1}回目の指名対象:</span>
-                          <select
-                            value={tId}
-                            onChange={(e) => {
-                              const val = parseInt(e.target.value);
-                              setMonkeyTargets(prev => {
-                                const copy = [...prev];
-                                copy[idx] = val;
-                                return copy;
-                              });
-                            }}
-                            className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-slate-200"
-                          >
-                            {players.map(p => (
-                              <option key={p.id} value={p.id}>{p.name} (影響力:{p.tokens})</option>
-                            ))}
-                          </select>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-slate-400 mb-4">※このラウンドでサルは提出されていません。</p>
-                  )}
-
-                  <button
-                    onClick={resolveMonkeyTargets}
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2 rounded-lg text-sm transition flex items-center gap-1.5"
-                  >
-                    全体相談完了・Step 6 投票へ <ArrowRight className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
-
-              {/* STEP 6 VOTE */}
-              {gameState === 'STEP6_VOTE' && (
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-lg font-bold text-emerald-400 flex items-center gap-2">
-                      <span className="bg-emerald-500/20 text-emerald-400 text-xs px-2 py-0.5 rounded-full border border-emerald-500/30">Step 6</span>
-                      両面トークン投票
-                    </h3>
-                    <button
-                      onClick={autoFillStep6Vote}
-                      className="bg-purple-600/30 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40 text-xs font-semibold px-3 py-1 rounded-lg flex items-center gap-1 transition"
-                    >
-                      <Dices className="w-3.5 h-3.5" /> ランダム投票入力
-                    </button>
-                  </div>
-                  <p className="text-xs text-slate-300 mb-4">
-                    下のプレイヤー一覧テーブルにて、各プレイヤーの「緑（賛成）」「赤（反対）」および投入枚数を選択してください。
-                  </p>
-                  <button
-                    onClick={submitVotes}
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-5 py-2 rounded-lg text-sm transition shadow-lg flex items-center gap-2"
-                  >
-                    投票を開封・集計し天秤を移動 <ArrowRight className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
-
-              {/* STEP 6 RESULT */}
-              {gameState === 'STEP6_RESULT' && step6Calc && (
-                <div>
-                  <h3 className="text-lg font-bold text-amber-400 mb-3 flex items-center gap-2">
-                    <CheckCircle2 className="w-5 h-5 text-emerald-400" /> 第{round}ラウンド 投票・天秤移動結果
-                  </h3>
-
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs mb-4">
-                    <div className="bg-slate-900 p-2.5 rounded-lg border border-slate-700">
-                      <span className="text-slate-400 block">アクション貢献値</span>
-                      <strong className="text-base text-slate-200">{step6Calc.actionContrib}</strong>
-                    </div>
-                    <div className="bg-slate-900 p-2.5 rounded-lg border border-emerald-500/40">
-                      <span className="text-slate-400 block">賛成合計 (緑+熱弁)</span>
-                      <strong className="text-base text-emerald-400">+{step6Calc.greenTotal + step6Calc.lionBonus}</strong>
-                      <span className="text-[10px] text-slate-400 block">(緑:{step6Calc.greenTotal} / 熱弁:+{step6Calc.lionBonus})</span>
-                    </div>
-                    <div className="bg-slate-900 p-2.5 rounded-lg border border-red-500/40">
-                      <span className="text-slate-400 block">反対合計 (赤+扇動)</span>
-                      <strong className="text-base text-red-400">-{step6Calc.redTotal + step6Calc.wolfBonus}</strong>
-                      <span className="text-[10px] text-slate-400 block">(赤:{step6Calc.redTotal} / 扇動:-{step6Calc.wolfBonus})</span>
-                    </div>
-                    <div className="bg-slate-900 p-2.5 rounded-lg border border-blue-500/40">
-                      <span className="text-slate-400 block">最終貢献値 vs 目標</span>
-                      <strong className="text-base text-blue-400">{step6Calc.finalContribution} vs {step6Calc.targetValue}</strong>
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-900/90 p-3 rounded-lg border border-amber-500/50 mb-4 text-xs font-semibold text-center text-amber-300">
-                    天秤移動量: {step6Calc.delta > 0 ? `+${step6Calc.delta}` : step6Calc.delta}  ➜  森の天秤の新しい位置: <span className="text-emerald-400 text-sm font-bold">{step6Calc.newBalance}</span>
-                  </div>
-
-                  <button
-                    onClick={proceedToDraft}
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-5 py-2 rounded-lg text-sm transition flex items-center gap-2"
-                  >
-                    カード返却 & 少数派ドラフト補充へ <ArrowRight className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
-
-              {/* STEP 6 DRAFT */}
-              {gameState === 'STEP6_DRAFT' && (
-                <div>
-                  <h3 className="text-lg font-bold text-emerald-400 mb-2 flex items-center gap-2">
-                    <span>📦</span> 少数派アクション提出者 ドラフト補充
-                  </h3>
-                  
-                  {draftQueue[currentDrafterIndex] !== undefined && (
-                    <div className="bg-slate-900 p-4 rounded-lg border border-slate-700 mb-4">
-                      <p className="text-xs text-slate-300 mb-3">
-                        順序: <strong className="text-emerald-400 font-bold">{players.find(p => p.id === draftQueue[currentDrafterIndex])?.name}</strong> のカード補充選択ターンです。中央サプライから1枚選んで補充してください。
-                      </p>
-
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                        {Object.keys(ACTION_CARDS).map((cardKey) => {
-                          const count = supply[cardKey];
-                          const card = ACTION_CARDS[cardKey];
-                          return (
-                            <button
-                              key={cardKey}
-                              disabled={count <= 0}
-                              onClick={() => handleDraftSelect(cardKey)}
-                              className={`p-3 rounded-lg border text-left flex flex-col justify-between transition ${
-                                count > 0 
-                                  ? 'bg-slate-800 border-slate-600 hover:border-emerald-500 hover:bg-slate-700' 
-                                  : 'bg-slate-900 border-slate-800 opacity-40 cursor-not-allowed'
-                              }`}
-                            >
-                              <span className="font-bold text-slate-200">{card.animal}</span>
-                              <span className="text-[10px] text-slate-400">予備残数: {count}枚</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-            </div>
-          )}
-
-          {/* GAME OVER SCREEN */}
-          {gameState === 'GAME_OVER' && (
-            <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg text-center">
-              <h2 className="text-3xl font-bold text-amber-400 mb-2">🎉 全5ラウンド終了！</h2>
-              <div className="text-xl font-bold text-slate-200 mb-4">
-                森の天秤 最終位置: <span className="text-emerald-400 text-2xl">{balance}</span>
-              </div>
-
-              {victoryInfo.isHerbivoreWin ? (
-                <div className="bg-emerald-950/80 border border-emerald-500 p-4 rounded-xl max-w-md mx-auto mb-6 text-emerald-300">
-                  <h3 className="text-xl font-bold mb-1">🌿 草食陣営『実り豊かな森』の勝利！</h3>
-                  <p className="text-xs text-emerald-400/80">勝利ゾーン範囲 (+1 〜 +{victoryInfo.winMax}) 内で見事に調和を保ちました。</p>
                 </div>
               ) : (
-                <div className="bg-red-950/80 border border-red-500 p-4 rounded-xl max-w-md mx-auto mb-6 text-red-300">
-                  <h3 className="text-xl font-bold mb-1">🍖 肉食陣営『飢えと飽和の荒れ野』の勝利！</h3>
-                  <p className="text-xs text-red-400/80">
-                    {balance <= 0 ? '枯渇・荒廃（0以下）に追い込みました。' : `過剰繁栄・崩壊（+${victoryInfo.winMax + 1}以上）を引き起こしました。`}
+                <div className="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                  今ラウンドはサルが出ていないため、指差し多数決はありません。
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Step 6: 両面トークン投票・天秤移動・少数派先頭時計回り全員1枚補充 */}
+          {game.step === 6 && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-lg font-bold flex items-center gap-2">
+                    <Vote className="w-5 h-5 text-indigo-700" />
+                    Step 6: 両面トークン投票・天秤移動・手札補充
+                  </h2>
+                  <p className="text-sm text-slate-600">
+                    投票開示後に熱弁家・扇動者を適用し、天秤移動後、<strong>最も少数派アクション選択者のうち親から時計回りで一番近い人を先頭に、時計回りで全プレイヤーが1枚補充</strong>して次ラウンドへ進みます。
                   </p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={handleRandomizeVotes}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold cursor-pointer"
+                  >
+                    <Shuffle className="w-4 h-4" />
+                    投票ランダム入力
+                  </button>
+
+                  <button
+                    onClick={handleSettleAndAdvanceRound}
+                    disabled={!game.actionRevealDone || isFinished}
+                    className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer ${
+                      !game.actionRevealDone || isFinished
+                        ? "bg-slate-300 text-slate-500 cursor-not-allowed"
+                        : "bg-indigo-700 hover:bg-indigo-800 text-white"
+                    }`}
+                  >
+                    <Coins className="w-4 h-4" />
+                    {game.round < game.maxRounds
+                      ? `精算して 第${game.round + 1}ラウンドへ`
+                      : "最終精算（ゲーム終了）"}
+                  </button>
+                </div>
+              </div>
+
+              {!game.actionRevealDone && (
+                <div className="flex items-center gap-2 text-sm text-amber-800 bg-amber-50 border border-amber-300 rounded-lg p-3">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>先に Step 4 で「①見張り・策士先行解決」と「②残り一斉公開＆精算」を実行してください。</span>
                 </div>
               )}
 
-              <button
-                onClick={initGame}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-6 rounded-lg transition shadow-lg flex items-center justify-center gap-2 mx-auto text-sm"
-              >
-                <RotateCcw className="w-4 h-4" /> もう一度テストプレイを行う
-              </button>
+              <div className="flex flex-wrap gap-4 text-sm bg-slate-50 border border-slate-200 rounded-lg p-3">
+                <span>
+                  現在の緑（賛成）合計: <strong className="text-emerald-700">{greenTotal}</strong>
+                </span>
+                <span>
+                  現在の赤（反対）合計: <strong className="text-rose-700">{redTotal}</strong>
+                </span>
+              </div>
             </div>
           )}
+        </section>
 
-          {/* PLAYERS TABLE & CONTROLS */}
-          {gameState !== 'SETUP' && (
-            <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 shadow-lg overflow-x-auto">
-              <h3 className="text-sm font-bold text-slate-200 mb-3 flex items-center justify-between">
-                <span>👥 プレイヤー全一覧 & 操作パネル</span>
-                <span className="text-xs font-normal text-slate-400">※（親）マークはラウンドスタートプレイヤー</span>
-              </h3>
-
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="border-b border-slate-700 text-slate-400">
-                    <th className="p-2">席順</th>
-                    <th className="p-2">プレイヤー</th>
-                    <th className="p-2">陣営 / 役職</th>
-                    <th className="p-2">手札 (4枚)</th>
-                    <th className="p-2">影響力</th>
-                    <th className="p-2">手元ロック</th>
-                    <th className="p-2">今Rアクション</th>
-                    <th className="p-2">今R役職発動</th>
-                    <th className="p-2">今R投票</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-700/60">
-                  {players.map((p) => {
-                    const isDealer = p.id === dealerIndex;
-                    const canUseRole = !p.coolDownCard;
-                    return (
-                      <tr key={p.id} className={`hover:bg-slate-700/30 ${isDealer ? 'bg-emerald-950/20' : ''}`}>
-                        
-                        {/* 席順 */}
-                        <td className="p-2 font-mono text-slate-400">#{p.id + 1}</td>
-
-                        {/* 名前 */}
-                        <td className="p-2 font-bold text-slate-200 flex items-center gap-1">
-                          {p.name}
-                          {isDealer && <span className="text-[10px] bg-emerald-600 text-white px-1 rounded font-normal">親</span>}
-                        </td>
-
-                        {/* 陣営 & 役職 */}
-                        <td className="p-2">
-                          {debugMode ? (
-                            <div className="space-y-0.5">
-                              <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                                p.faction === 'HERBIVORE' ? 'bg-emerald-900/60 text-emerald-300' : 'bg-red-900/60 text-red-300'
-                              }`}>
-                                {p.faction === 'HERBIVORE' ? '🌿 草食' : '🍖 肉食'}
-                              </span>
-                              <div className="text-[11px] text-slate-300">
-                                {ROLES[p.role].animal}
-                              </div>
-                            </div>
-                          ) : (
-                            <span className="text-slate-500 italic">🔒 伏せ</span>
-                          )}
-                        </td>
-
-                        {/* 手札 */}
-                        <td className="p-2">
-                          <div className="flex flex-wrap gap-1">
-                            {p.hand.map((cKey, idx) => (
-                              <span key={idx} className="bg-slate-900 border border-slate-700 px-1 py-0.5 rounded text-[10px]">
-                                {ACTION_CARDS[cKey].icon}
-                              </span>
-                            ))}
-                          </div>
-                        </td>
-
-                        {/* 影響力トークン */}
-                        <td className="p-2 font-bold text-amber-400">
-                          🟢 {p.tokens}個
-                        </td>
-
-                        {/* 手元ロック（キツネ・サル クールタイム） */}
-                        <td className="p-2">
-                          {p.coolDownCard ? (
-                            <span className="bg-red-950 border border-red-700 text-red-400 px-1.5 py-0.5 rounded text-[10px] font-semibold">
-                              {ACTION_CARDS[p.coolDownCard].icon} 役職不可
-                            </span>
-                          ) : (
-                            <span className="text-slate-500 text-[10px]">-</span>
-                          )}
-                        </td>
-
-                        {/* Step 3 アクション選択 */}
-                        <td className="p-2">
-                          {gameState === 'STEP3' ? (
-                            <select
-                              value={p.selectedAction || ''}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                setPlayers(prev => prev.map(pl => pl.id === p.id ? { ...pl, selectedAction: val } : pl));
-                              }}
-                              className="bg-slate-900 border border-slate-600 text-xs rounded px-1.5 py-1 text-slate-200"
-                            >
-                              <option value="">選択...</option>
-                              {p.hand.map((cKey, idx) => (
-                                <option key={idx} value={cKey}>{ACTION_CARDS[cKey].name}</option>
-                              ))}
-                            </select>
-                          ) : (
-                            <span>
-                              {p.selectedAction ? (
-                                (debugMode || gameState.startsWith('STEP4') || gameState === 'STEP5' || gameState.startsWith('STEP6') || p.lookoutRevealed) 
-                                  ? ACTION_CARDS[p.selectedAction].icon + ' ' + ACTION_CARDS[p.selectedAction].name 
-                                  : '🔒 伏せ'
-                              ) : '-'}
-                            </span>
-                          )}
-                        </td>
-
-                        {/* Step 3 役職使用有無 */}
-                        <td className="p-2">
-                          {gameState === 'STEP3' ? (
-                            <label className="flex items-center gap-1 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                disabled={!canUseRole}
-                                checked={p.useRole}
-                                onChange={(e) => {
-                                  const checked = e.target.checked;
-                                  setPlayers(prev => prev.map(pl => pl.id === p.id ? { ...pl, useRole: checked } : pl));
-                                }}
-                                className="rounded bg-slate-900 border-slate-600 text-emerald-500 focus:ring-0"
-                              />
-                              <span className={`text-[11px] ${!canUseRole ? 'text-slate-600 line-through' : 'text-slate-300'}`}>
-                                伏せる
-                              </span>
-                            </label>
-                          ) : (
-                            <span className="text-[11px]">
-                              {p.useRole ? '✅ 伏せ済' : '❌ 未使用'}
-                            </span>
-                          )}
-                        </td>
-
-                        {/* Step 6 投票選択 */}
-                        <td className="p-2">
-                          {gameState === 'STEP6_VOTE' ? (
-                            <div className="flex items-center gap-1">
-                              <select
-                                value={p.voteColor}
-                                onChange={(e) => {
-                                  const col = e.target.value;
-                                  setPlayers(prev => prev.map(pl => pl.id === p.id ? { ...pl, voteColor: col, voteAmount: col === 'NONE' ? 0 : Math.min(1, pl.tokens) } : pl));
-                                }}
-                                className="bg-slate-900 border border-slate-600 text-xs rounded px-1 py-1 text-slate-200"
-                              >
-                                <option value="NONE">棄権</option>
-                                <option value="GREEN">緑(賛成)</option>
-                                <option value="RED">赤(反対)</option>
-                              </select>
-                              {p.voteColor !== 'NONE' && (
-                                <input
-                                  type="number"
-                                  min="1"
-                                  max={p.tokens}
-                                  value={p.voteAmount}
-                                  onChange={(e) => {
-                                    const amt = Math.max(0, Math.min(p.tokens, parseInt(e.target.value) || 0));
-                                    setPlayers(prev => prev.map(pl => pl.id === p.id ? { ...pl, voteAmount: amt } : pl));
-                                  }}
-                                  className="w-12 bg-slate-900 border border-slate-600 text-xs rounded px-1 py-1 text-center font-bold text-amber-400"
-                                />
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-[11px]">
-                              {p.voteColor === 'GREEN' && `🟢 緑 x${p.voteAmount}`}
-                              {p.voteColor === 'RED' && `🔴 赤 x${p.voteAmount}`}
-                              {p.voteColor === 'NONE' && `-`}
-                            </span>
-                          )}
-                        </td>
-
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-        </div>
-
-        {/* RIGHT 1 COLUMN: LOGS & RULE QUICK REFERENCE */}
-        <div className="space-y-6">
-
-          {/* GAME LOGS CONTAINER */}
-          <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 shadow-lg flex flex-col h-96">
-            <h3 className="text-sm font-bold text-slate-200 mb-2 flex items-center justify-between border-b border-slate-700 pb-2">
-              <span className="flex items-center gap-1.5"><Info className="w-4 h-4 text-emerald-400" /> リアルタイム進行ログ</span>
-              <span className="text-[10px] text-slate-400">時系列降順</span>
-            </h3>
-
-            <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 font-mono text-[11px] leading-relaxed text-slate-300">
-              {logs.map((log, idx) => (
-                <div key={idx} className="bg-slate-900/60 p-1.5 rounded border border-slate-800/80">
-                  {log}
-                </div>
+        {/* 選択中プレイヤー詳細操作パネル */}
+        <section className="bg-white rounded-xl border border-slate-300 p-4 md:p-5 shadow-sm space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
+            <h2 className="text-base md:text-lg font-bold">
+              個別プレイヤー操作: {selectedPlayer.name}（席#{selectedPlayer.id + 1}）
+            </h2>
+            <div className="flex flex-wrap gap-1.5">
+              {game.players.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => setSelectedPlayerId(p.id)}
+                  className={`px-2.5 py-1 rounded text-xs font-bold cursor-pointer ${
+                    selectedPlayerId === p.id
+                      ? "bg-emerald-700 text-white"
+                      : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                  }`}
+                >
+                  {p.name}
+                  {p.id === game.parentIndex ? "👑" : ""}
+                </button>
               ))}
             </div>
           </div>
 
-          {/* RULE QUICK REFERENCE */}
-          <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 shadow-lg text-xs space-y-3">
-            <h3 className="font-bold text-emerald-400 border-b border-slate-700 pb-2 flex items-center gap-1.5">
-              <HelpCircle className="w-4 h-4" /> 各カード・ルールクイック参照
-            </h3>
-
-            <div>
-              <span className="font-bold text-slate-200 block mb-1">【アクションカード】</span>
-              <ul className="space-y-1 text-slate-400">
-                <li>🐘 ゾウ: 貢献+3 / 影響0 / 制限なし</li>
-                <li>🐿️ リス: 貢献+1 / 影響+1 / 制限なし</li>
-                <li>🦊 キツネ: 貢献-1 / 影響+3 / <strong className="text-red-400">翌R役職不可</strong></li>
-                <li>🐒 サル: 貢献-2 / 影響+1 / <strong className="text-red-400">翌R役職不可</strong>・多数決他者影響-1</li>
-              </ul>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* 陣営・役職・影響力 */}
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+              <div className="text-xs font-bold text-slate-500">ステータス</div>
+              <div className="text-sm">
+                陣営:{" "}
+                <strong
+                  className={
+                    gmView
+                      ? selectedPlayer.faction === "herbivore"
+                        ? "text-emerald-700"
+                        : "text-rose-700"
+                      : "text-slate-500"
+                  }
+                >
+                  {gmView
+                    ? selectedPlayer.faction === "herbivore"
+                      ? "🌿 草食陣営"
+                      : "🍖 肉食陣営"
+                    : "（秘匿）"}
+                </strong>
+              </div>
+              <div className="text-sm">
+                今R役職:{" "}
+                <strong>
+                  {gmView && selectedPlayer.role
+                    ? `${ROLE_META[selectedPlayer.role].emoji} ${ROLE_META[selectedPlayer.role].name}`
+                    : "（秘匿 / なし）"}
+                </strong>
+              </div>
+              <div className="text-sm">
+                手元トークン（最大8）: <strong>{selectedPlayer.influence}個</strong>
+              </div>
+              {selectedPlayer.lockedNextRound && (
+                <div className="text-xs font-bold text-rose-700 bg-rose-100 px-2 py-1 rounded">
+                  🔒 今ラウンドは役職カード使用・公開不可（前Rキツネ/サル留置中）
+                </div>
+              )}
             </div>
 
-            <div>
-              <span className="font-bold text-slate-200 block mb-1">【役職カード】</span>
-              <ul className="space-y-1 text-slate-400">
-                <li>🦁 熱弁家: 緑1枚以上投票時、賛成+2</li>
-                <li>🦫 調停者: サル出現時、マイナス1回分(-2→0)無効化</li>
-                <li>🕊️ 運び屋: 公開直後、他者へトークン1個譲渡</li>
-                <li>🐙 策士: キツネ提出時、オープンして影響+1</li>
-                <li>🐺 扇動者: 赤1枚以上投票時、反対-2(マイナス2強化)</li>
-                <li>🦉 見張り: シャッフル前他者とカード宣言し的中時影響+1</li>
-              </ul>
+            {/* アクション＆役職提出設定 */}
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+              <div className="text-xs font-bold text-slate-500">手札（4枚）からアクション選択</div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {selectedPlayer.hand.map((actId) => {
+                  const m = ACTION_META[actId];
+                  const active = selectedPlayer.submittedAction === actId;
+                  return (
+                    <button
+                      key={actId}
+                      onClick={() => updatePlayer(selectedPlayer.id, { submittedAction: actId })}
+                      className={`p-2 rounded border text-left text-xs cursor-pointer ${
+                        active
+                          ? "bg-emerald-700 text-white border-emerald-800 font-bold"
+                          : "bg-white text-slate-800 border-slate-300 hover:bg-slate-100"
+                      }`}
+                    >
+                      <div>
+                        {m.emoji} {m.shortName}
+                      </div>
+                      <div className="opacity-80">{m.desc}</div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <label className="flex items-center gap-2 pt-1 text-xs font-semibold">
+                <input
+                  type="checkbox"
+                  disabled={selectedPlayer.lockedNextRound || !selectedPlayer.role}
+                  checked={!!selectedPlayer.submittedRole}
+                  onChange={(e) =>
+                    updatePlayer(selectedPlayer.id, { submittedRole: e.target.checked })
+                  }
+                />
+                <span>このラウンドで役職カードを発動する</span>
+              </label>
+
+              {!selectedPlayer.lockedNextRound && selectedPlayer.role === "owl" && (
+                <div className="flex flex-wrap gap-2 pt-1 text-xs">
+                  <select
+                    value={selectedPlayer.owlTargetId ?? ""}
+                    onChange={(e) =>
+                      updatePlayer(selectedPlayer.id, { owlTargetId: Number(e.target.value) })
+                    }
+                    className="border border-slate-300 bg-white rounded px-2 py-1"
+                  >
+                    <option value="">見張り対象を選択</option>
+                    {game.players
+                      .filter((p) => p.id !== selectedPlayer.id)
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                  </select>
+                  <select
+                    value={selectedPlayer.owlGuessAction}
+                    onChange={(e) =>
+                      updatePlayer(selectedPlayer.id, { owlGuessAction: e.target.value })
+                    }
+                    className="border border-slate-300 bg-white rounded px-2 py-1"
+                  >
+                    {ACTION_TYPES.map((a) => (
+                      <option key={a} value={a}>
+                        宣言: {ACTION_META[a].shortName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {!selectedPlayer.lockedNextRound && selectedPlayer.role === "beaver" && (
+                <div className="pt-1 text-xs">
+                  <select
+                    value={selectedPlayer.beaverTargetId ?? ""}
+                    onChange={(e) =>
+                      updatePlayer(selectedPlayer.id, { beaverTargetId: Number(e.target.value) })
+                    }
+                    className="border border-slate-300 bg-white rounded px-2 py-1"
+                  >
+                    <option value="">調停者（譲渡先）を選択</option>
+                    {game.players
+                      .filter((p) => p.id !== selectedPlayer.id)
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
+            {/* 投票トークン設定 */}
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+              <div className="text-xs font-bold text-slate-500">
+                両面トークン投票（所持: {selectedPlayer.influence}個）
+              </div>
+              <div className="flex items-center gap-3 text-sm">
+                <label className="flex items-center gap-1">
+                  <span className="text-emerald-700 font-bold">緑（賛成）:</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={selectedPlayer.influence}
+                    value={selectedPlayer.voteGreen || 0}
+                    onChange={(e) => {
+                      const g = Math.max(0, Math.min(selectedPlayer.influence, Number(e.target.value) || 0));
+                      const maxR = Math.max(0, selectedPlayer.influence - g);
+                      updatePlayer(selectedPlayer.id, (p) => ({
+                        ...p,
+                        voteGreen: g,
+                        voteRed: Math.min(p.voteRed || 0, maxR),
+                      }));
+                    }}
+                    className="w-16 border border-slate-300 bg-white rounded px-2 py-1"
+                  />
+                </label>
+
+                <label className="flex items-center gap-1">
+                  <span className="text-rose-700 font-bold">赤（反対）:</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={Math.max(0, selectedPlayer.influence - (selectedPlayer.voteGreen || 0))}
+                    value={selectedPlayer.voteRed || 0}
+                    onChange={(e) => {
+                      const maxR = Math.max(0, selectedPlayer.influence - (selectedPlayer.voteGreen || 0));
+                      const r = Math.max(0, Math.min(maxR, Number(e.target.value) || 0));
+                      updatePlayer(selectedPlayer.id, { voteRed: r });
+                    }}
+                    className="w-16 border border-slate-300 bg-white rounded px-2 py-1"
+                  />
+                </label>
+              </div>
+              <p className="text-xs text-slate-500">
+                ※ 投票で使用したトークンは精算時に中央サプライへ返却されます。
+              </p>
             </div>
           </div>
+        </section>
 
-        </div>
+        {/* 全プレイヤー一覧テーブル */}
+        <section className="bg-white rounded-xl border border-slate-300 p-4 md:p-5 shadow-sm space-y-3">
+          <h2 className="text-base md:text-lg font-bold">全プレイヤー一覧（時計回り順）</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs md:text-sm border-collapse">
+              <thead>
+                <tr className="bg-slate-100 border-b border-slate-300 text-left">
+                  <th className="p-2">席</th>
+                  <th className="p-2">名前</th>
+                  <th className="p-2">陣営</th>
+                  <th className="p-2">今R役職</th>
+                  <th className="p-2">手札</th>
+                  <th className="p-2">影響力</th>
+                  <th className="p-2">手元留置</th>
+                  <th className="p-2">提出アクション</th>
+                  <th className="p-2">役職伏せ</th>
+                  <th className="p-2">投票(緑/赤)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {game.players.map((p) => {
+                  const showAct = gmView || game.step >= 4;
+                  return (
+                    <tr
+                      key={p.id}
+                      onClick={() => setSelectedPlayerId(p.id)}
+                      className={`border-b border-slate-200 cursor-pointer ${
+                        selectedPlayerId === p.id ? "bg-emerald-50/70" : "hover:bg-slate-50"
+                      }`}
+                    >
+                      <td className="p-2 font-mono">#{p.id + 1}</td>
+                      <td className="p-2 font-bold">
+                        {p.name} {p.id === game.parentIndex ? "👑" : ""}
+                      </td>
+                      <td className="p-2">
+                        {gmView ? (
+                          p.faction === "herbivore" ? (
+                            <span className="text-emerald-700 font-semibold">🌿 草食</span>
+                          ) : (
+                            <span className="text-rose-700 font-semibold">🍖 肉食</span>
+                          )
+                        ) : (
+                          <span className="text-slate-400">秘匿</span>
+                        )}
+                      </td>
+                      <td className="p-2">
+                        {gmView && p.role ? (
+                          <span>
+                            {ROLE_META[p.role].emoji} {ROLE_META[p.role].shortName}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">秘匿</span>
+                        )}
+                      </td>
+                      <td className="p-2">
+                        {gmView
+                          ? p.hand.map((a) => ACTION_META[a].shortName).join(", ")
+                          : `${p.hand.length}枚`}
+                      </td>
+                      <td className="p-2 font-bold">{p.influence}個</td>
+                      <td className="p-2">
+                        {p.heldCards.length > 0
+                          ? p.heldCards.map((c) => ACTION_META[c].shortName).join(",")
+                          : "-"}
+                      </td>
+                      <td className="p-2">
+                        {p.submittedAction ? (
+                          showAct ? (
+                            <span className="font-semibold">
+                              {ACTION_META[p.submittedAction].emoji}{" "}
+                              {ACTION_META[p.submittedAction].shortName}
+                            </span>
+                          ) : (
+                            <span className="text-indigo-700 font-semibold">伏せ済</span>
+                          )
+                        ) : (
+                          <span className="text-slate-400">未提出</span>
+                        )}
+                      </td>
+                      <td className="p-2">
+                        {p.lockedNextRound ? (
+                          <span className="text-rose-600 font-semibold">使用不可</span>
+                        ) : p.submittedRole ? (
+                          <span className="text-amber-700 font-semibold">伏せ済</span>
+                        ) : (
+                          <span className="text-slate-400">-</span>
+                        )}
+                      </td>
+                      <td className="p-2 font-mono">
+                        {p.voteGreen || 0} / {p.voteRed || 0}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
 
+        {/* 進行ログ */}
+        <section className="bg-white rounded-xl border border-slate-300 p-4 md:p-5 shadow-sm space-y-2">
+          <h2 className="text-base font-bold">進行ログ</h2>
+          <div className="max-h-60 overflow-y-auto bg-slate-950 text-slate-100 rounded-lg p-3 font-mono text-xs space-y-1">
+            {game.logs.map((entry, i) => (
+              <div key={i}>{entry}</div>
+            ))}
+          </div>
+        </section>
       </div>
     </div>
   );
