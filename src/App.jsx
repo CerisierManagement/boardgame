@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   Users,
   Scale,
@@ -186,6 +186,49 @@ function dealRoles(playerCount) {
   return shuffleArray(pool).slice(0, playerCount);
 }
 
+// 補充開始プレイヤー（最も少数派アクション選択者のうち、親から時計回りで一番近い人）と時計回り補充順を返す
+function computeRefillOrder(players, parentIndex) {
+  const n = players.length;
+  const countsByAction = { elephant: 0, squirrel: 0, fox: 0, monkey: 0 };
+  players.forEach((p) => {
+    const act = p.submittedAction || "elephant";
+    countsByAction[act] += 1;
+  });
+  const minCount = Math.min(...ACTION_TYPES.map((a) => countsByAction[a]));
+  const minorityActions = new Set(ACTION_TYPES.filter((a) => countsByAction[a] === minCount));
+
+  let startIndex = parentIndex;
+  for (let offset = 0; offset < n; offset++) {
+    const idx = (parentIndex + offset) % n;
+    if (minorityActions.has(players[idx].submittedAction || "elephant")) {
+      startIndex = idx;
+      break;
+    }
+  }
+
+  return {
+    startIndex,
+    order: Array.from({ length: n }, (_, k) => (startIndex + k) % n),
+  };
+}
+
+// 返却後のサプライ在庫を計算
+function computeReturnedSupply(players, currentSupply) {
+  const nextSupply = { ...currentSupply };
+  players.forEach((p) => {
+    if (p.heldCards && p.heldCards.length > 0) {
+      p.heldCards.forEach((cardId) => {
+        nextSupply[cardId] = (nextSupply[cardId] || 0) + 1;
+      });
+    }
+    const act = p.submittedAction || "elephant";
+    if (act === "elephant" || act === "squirrel") {
+      nextSupply[act] = (nextSupply[act] || 0) + 1;
+    }
+  });
+  return nextSupply;
+}
+
 function createInitialGame(playerCount = 5) {
   const clamped = Math.max(5, Math.min(15, playerCount));
   const cfg = getConfigByPlayerCount(clamped);
@@ -229,6 +272,7 @@ function createInitialGame(playerCount = 5) {
     actionRevealDone: false,
     actionRevealSummary: null,
     monkeyPenaltyTargets: [],
+    refillChoices: {},
     votingDone: false,
     lastRoundResult: null,
     players,
@@ -246,6 +290,50 @@ export default function App() {
 
   const config = useMemo(() => getConfigByPlayerCount(game.playerCount), [game.playerCount]);
   const selectedPlayer = game.players[selectedPlayerId] || game.players[0];
+
+  // 補充順と返却後サプライ在庫を算出
+  const refillInfo = useMemo(
+    () => computeRefillOrder(game.players, game.parentIndex),
+    [game.players, game.parentIndex]
+  );
+
+  const returnedSupply = useMemo(
+    () => computeReturnedSupply(game.players, game.supply),
+    [game.players, game.supply]
+  );
+
+  // 各プレイヤーの選択カード（未指定の場合はその時点で在庫があるカードを自動初期値にする）
+  const resolvedRefillChoices = useMemo(() => {
+    const tempSupply = { ...returnedSupply };
+    const choices = {};
+
+    refillInfo.order.forEach((pIdx) => {
+      const p = game.players[pIdx];
+      const desired = game.refillChoices[p.id];
+      if (desired && (tempSupply[desired] || 0) > 0) {
+        choices[p.id] = desired;
+        tempSupply[desired] -= 1;
+      } else {
+        const fallback = ACTION_TYPES.find((a) => (tempSupply[a] || 0) > 0) || null;
+        choices[p.id] = fallback;
+        if (fallback) {
+          tempSupply[fallback] -= 1;
+        }
+      }
+    });
+
+    return choices;
+  }, [game.players, game.refillChoices, refillInfo.order, returnedSupply]);
+
+  // Step 6に入った際、初期選択をStateに同期（ユーザーが任意変更できるようにする）
+  useEffect(() => {
+    if (game.step === 6 && game.actionRevealDone && Object.keys(game.refillChoices).length === 0) {
+      setGame((prev) => ({
+        ...prev,
+        refillChoices: resolvedRefillChoices,
+      }));
+    }
+  }, [game.step, game.actionRevealDone, game.refillChoices, resolvedRefillChoices]);
 
   const appendLog = (prevLogs, text) => [...prevLogs, `[R${game.round}-S${game.step}] ${text}`];
 
@@ -300,13 +388,13 @@ export default function App() {
       return {
         ...prev,
         players: nextPlayers,
+        refillChoices: {},
         logs: appendLog(prev.logs, "全プレイヤーの提出カード（アクション・任意役職）を自動セットしました。"),
       };
     });
   };
 
   // Step 4-A: 「見張り（フクロウ）」と「策士（タコ）」の先行解決
-  // 仕様①: アクションカードを回収・一斉公開する前に見張り・策士が先行発動する
   const handleResolvePreReveal = () => {
     setGame((prev) => {
       if (prev.preRevealDone) return prev;
@@ -314,7 +402,6 @@ export default function App() {
       const working = prev.players.map((p) => ({ ...p }));
       const messages = [];
 
-      // 1. 見張り（フクロウ）先行解決
       working.forEach((p) => {
         const canUse = !p.lockedNextRound && p.submittedRole && p.role === "owl";
         if (!canUse) return;
@@ -336,7 +423,6 @@ export default function App() {
         );
       });
 
-      // 2. 策士（タコ）先行オープン解決（キツネ提出者がアクションと役職を先行オープンして影響力+1）
       working.forEach((p) => {
         const canUse = !p.lockedNextRound && p.submittedRole && p.role === "octopus";
         if (!canUse) return;
@@ -374,14 +460,12 @@ export default function App() {
       const working = prev.players.map((p) => ({ ...p }));
       const messages = [];
 
-      // 提出漏れがあれば手札先頭を自動補完
       working.forEach((p) => {
         if (!p.submittedAction) {
           p.submittedAction = p.hand[0] || "elephant";
         }
       });
 
-      // シャッフルして一斉公開
       const shuffledOrder = shuffleArray(working.map((p) => p.id));
       messages.push(
         `🔀 残りアクション一斉公開順: ${shuffledOrder
@@ -392,7 +476,6 @@ export default function App() {
           .join(" → ")}`
       );
 
-      // 基本貢献値計算
       let baseContribution = 0;
       let monkeyCount = 0;
       working.forEach((p) => {
@@ -400,9 +483,10 @@ export default function App() {
         baseContribution += meta.contribution;
         if (p.submittedAction === "monkey") monkeyCount += 1;
       });
-      messages.push(`📊 アクション基本貢献値合計: ${baseContribution >= 0 ? `+${baseContribution}` : baseContribution}`);
+      messages.push(
+        `📊 アクション基本貢献値合計: ${baseContribution >= 0 ? `+${baseContribution}` : baseContribution}`
+      );
 
-      // 運び屋（ハト）: サルが出たとき、表向きにして全体のマイナス補正（-2→0）を1回分無効化
       let doveNegatedMonkeys = 0;
       working.forEach((p) => {
         const canUse = !p.lockedNextRound && p.submittedRole && p.role === "dove";
@@ -415,10 +499,11 @@ export default function App() {
       const effectiveMonkeyPenalty = Math.max(0, monkeyCount - doveNegatedMonkeys) * -2;
       const actionContribution = baseContribution + monkeyCount * 2 + effectiveMonkeyPenalty;
       messages.push(
-        `⚖️ サル補正反映後の貢献値: ${actionContribution >= 0 ? `+${actionContribution}` : actionContribution}（サル${monkeyCount}枚 / 無効化${doveNegatedMonkeys}枚）`
+        `⚖️ サル補正反映後の貢献値: ${
+          actionContribution >= 0 ? `+${actionContribution}` : actionContribution
+        }（サル${monkeyCount}枚 / 無効化${doveNegatedMonkeys}枚）`
       );
 
-      // 調停者（ビーバー）: 公開直後に表向きにし、他のプレイヤー1人に影響力トークンを1個譲渡
       working.forEach((p) => {
         const canUse = !p.lockedNextRound && p.submittedRole && p.role === "beaver";
         if (!canUse) return;
@@ -434,7 +519,6 @@ export default function App() {
         }
       });
 
-      // アクションカード分の影響力増減（上限8）
       working.forEach((p) => {
         const gain = ACTION_META[p.submittedAction].influence;
         if (gain !== 0) {
@@ -456,12 +540,13 @@ export default function App() {
           doveNegatedMonkeys,
           messages,
         },
+        refillChoices: {},
         logs: [...prev.logs, ...messages.map((m) => `[R${prev.round}-S4公開] ${m}`)],
       };
     });
   };
 
-  // Step 5: サル指差し多数決（サル枚数分の対象選択をランダム補助）
+  // Step 5: サル指差し多数決ランダム選択
   const handleRandomMonkeyTargets = () => {
     const monkeyCount = game.actionRevealSummary?.monkeyCount || 0;
     if (monkeyCount <= 0) return;
@@ -476,6 +561,67 @@ export default function App() {
         `🐒 サル指差し対象（${monkeyCount}回分）を自動選択: ${picks.map((id) => `P${id + 1}`).join(", ")}`
       ),
     }));
+  };
+
+  // Step 6: 全員の補充カードを在庫範囲内でランダム選択
+  const handleRandomizeRefillChoices = () => {
+    setGame((prev) => {
+      const baseSup = computeReturnedSupply(prev.players, prev.supply);
+      const { order } = computeRefillOrder(prev.players, prev.parentIndex);
+      const nextChoices = {};
+
+      order.forEach((pIdx) => {
+        const p = prev.players[pIdx];
+        const available = ACTION_TYPES.filter((a) => (baseSup[a] || 0) > 0);
+        if (available.length > 0) {
+          const picked = available[Math.floor(Math.random() * available.length)];
+          nextChoices[p.id] = picked;
+          baseSup[picked] -= 1;
+        } else {
+          nextChoices[p.id] = null;
+        }
+      });
+
+      return {
+        ...prev,
+        refillChoices: nextChoices,
+        logs: appendLog(prev.logs, "補充対象プレイヤーの補充カードをランダム選択しました。"),
+      };
+    });
+  };
+
+  // 特定プレイヤーの補充カードを変更（他プレイヤーの選択と重複して在庫切れになる場合は在庫ありカードへ自動調整）
+  const handleChangeRefillChoice = (playerId, cardId) => {
+    setGame((prev) => {
+      const baseSup = computeReturnedSupply(prev.players, prev.supply);
+      const { order } = computeRefillOrder(prev.players, prev.parentIndex);
+
+      const candidateMap = {
+        ...prev.refillChoices,
+        [playerId]: cardId,
+      };
+
+      const adjusted = {};
+      order.forEach((pIdx) => {
+        const p = prev.players[pIdx];
+        const want = candidateMap[p.id];
+        if (want && (baseSup[want] || 0) > 0) {
+          adjusted[p.id] = want;
+          baseSup[want] -= 1;
+        } else {
+          const fallback = ACTION_TYPES.find((a) => (baseSup[a] || 0) > 0) || null;
+          adjusted[p.id] = fallback;
+          if (fallback) {
+            baseSup[fallback] -= 1;
+          }
+        }
+      });
+
+      return {
+        ...prev,
+        refillChoices: adjusted,
+      };
+    });
   };
 
   // Step 6: 投票ランダム入力
@@ -498,9 +644,7 @@ export default function App() {
     });
   };
 
-  // Step 6 精算＆次ラウンド移行
-  // 仕様②: 投票結果開示後に熱弁家・扇動者を解決し、使用トークン全返却
-  // 仕様③: 少数派アクション選択者のうち親から時計回りで一番近い人を先頭に、時計回りで全員が1枚補充して手札4枚を維持
+  // Step 6: 精算＆各自が選んだ補充カードで手札4枚復帰＆次ラウンド移行
   const handleSettleAndAdvanceRound = () => {
     setGame((prev) => {
       const n = prev.playerCount;
@@ -544,16 +688,13 @@ export default function App() {
         greenSum += g;
         redSum += r;
 
-        // 投票で使用したトークンは手元から減らし中央サプライへ返却
         p.influence = Math.max(0, p.influence - (g + r));
 
-        // 熱弁家: 緑（賛成）を1枚以上出したとき +2
         const canUseRole = !p.lockedNextRound && p.submittedRole;
         if (canUseRole && p.role === "lion" && g >= 1) {
           lionBonus += 2;
           logs.push(`[R${prev.round}-S6] 🦁熱弁家(${p.name})発動: 緑${g}枚投票につき賛成合計+2！`);
         }
-        // 扇動者: 赤（反対）を1枚以上出したとき、反対合計のマイナス影響をさらに2強化
         if (canUseRole && p.role === "wolf" && r >= 1) {
           wolfExtraPenalty += 2;
           logs.push(`[R${prev.round}-S6] 🐺扇動者(${p.name})発動: 赤${r}枚投票につき反対マイナス影響を+2強化！`);
@@ -577,32 +718,9 @@ export default function App() {
         }（現在 ${nextScale}）`
       );
 
-      // 最も少数派のアクションを特定（同数最小タイはすべて同列少数派）
-      const countsByAction = { elephant: 0, squirrel: 0, fox: 0, monkey: 0 };
-      working.forEach((p) => {
-        const act = p.submittedAction || "elephant";
-        countsByAction[act] += 1;
-      });
-      const minCount = Math.min(...ACTION_TYPES.map((a) => countsByAction[a]));
-      const minorityActions = new Set(ACTION_TYPES.filter((a) => countsByAction[a] === minCount));
-
-      // 最も少数派アクション選択者のうち、今Rの親から時計回りで一番近い人を探す
-      let startDrawIndex = prev.parentIndex;
-      for (let offset = 0; offset < n; offset++) {
-        const idx = (prev.parentIndex + offset) % n;
-        if (minorityActions.has(working[idx].submittedAction)) {
-          startDrawIndex = idx;
-          break;
-        }
-      }
-
-      // サプライ返却と手札からの提出カード除外
-      // 仕様: 今R使用のゾウ・リスと、前Rから手元にあったキツネ・サルを共有サプライへ返却
-      // 今R提出のキツネ・サルはサプライに入れず、各自の前に表向きで残し、次R役職不可にする
+      // サプライ返却＆提出カード除外
       const nextSupply = { ...prev.supply };
-
       working.forEach((p) => {
-        // 前ラウンドから手元に置かれていたキツネ・サルをサプライへ返却
         if (p.heldCards.length > 0) {
           p.heldCards.forEach((cardId) => {
             nextSupply[cardId] = (nextSupply[cardId] || 0) + 1;
@@ -611,7 +729,6 @@ export default function App() {
         }
 
         const act = p.submittedAction || "elephant";
-        // 手札から提出した1枚を除外
         const cardPos = p.hand.indexOf(act);
         if (cardPos !== -1) {
           p.hand.splice(cardPos, 1);
@@ -621,31 +738,38 @@ export default function App() {
           nextSupply[act] = (nextSupply[act] || 0) + 1;
           p.lockedNextRound = false;
         } else {
-          // キツネ or サル: 次のラウンド終了時まで手元に表向きで残し、次R役職不可
           p.heldCards = [act];
           p.lockedNextRound = true;
         }
       });
 
-      // 仕様②修正: 少数派の人を先頭に時計回りで「全プレイヤー」が1枚ずつ補充し、常に4枚を維持
-      const drawOrder = Array.from({ length: n }, (_, k) => (startDrawIndex + k) % n);
+      // 少数派先頭・時計回りで全員が任意の1枚を選択して補充
+      const { startIndex, order } = computeRefillOrder(working, prev.parentIndex);
       const drawSummary = [];
 
-      drawOrder.forEach((pIdx) => {
+      order.forEach((pIdx) => {
         const pl = working[pIdx];
         if (pl.hand.length >= 4) return;
-        const availableAction = ACTION_TYPES.find((a) => (nextSupply[a] || 0) > 0);
-        if (availableAction) {
-          nextSupply[availableAction] -= 1;
-          pl.hand.push(availableAction);
-          drawSummary.push(`${pl.name}←${ACTION_META[availableAction].shortName}`);
+
+        const chosen = prev.refillChoices[pl.id];
+        let pickedCard = null;
+        if (chosen && (nextSupply[chosen] || 0) > 0) {
+          pickedCard = chosen;
         } else {
-          drawSummary.push(`${pl.name}←(枯渇)`);
+          pickedCard = ACTION_TYPES.find((a) => (nextSupply[a] || 0) > 0) || null;
+        }
+
+        if (pickedCard) {
+          nextSupply[pickedCard] -= 1;
+          pl.hand.push(pickedCard);
+          drawSummary.push(`${pl.name}←${ACTION_META[pickedCard].shortName}`);
+        } else {
+          drawSummary.push(`${pl.name}←(在庫なし)`);
         }
       });
 
       logs.push(
-        `[R${prev.round}-S6] 🔄 少数派先頭(${working[startDrawIndex].name})から時計回りで全員1枚補充: ${
+        `[R${prev.round}-S6] 🔄 少数派先頭(${working[startIndex].name})から時計回りで各自選択補充: ${
           drawSummary.join(", ") || "なし"
         }`
       );
@@ -661,7 +785,6 @@ export default function App() {
         monkeyPenaltyTotal,
       };
 
-      // 最終ラウンド（5R）終了時は次ラウンドへ進まず結果表示
       if (prev.round >= prev.maxRounds) {
         return {
           ...prev,
@@ -674,12 +797,12 @@ export default function App() {
           })),
           supply: nextSupply,
           scale: nextScale,
+          refillChoices: {},
           lastRoundResult: roundRecord,
           logs: [...logs, `🏁 全5ラウンド終了！最終「森の天秤」は ${nextScale} です。`],
         };
       }
 
-      // 次ラウンドへ: 役職回収・シャッフル再配布、親を時計回りに1人進める
       const nextRound = prev.round + 1;
       const nextParent = (prev.parentIndex + 1) % n;
       const redealtRoles = dealRoles(n);
@@ -715,6 +838,7 @@ export default function App() {
         actionRevealDone: false,
         actionRevealSummary: null,
         monkeyPenaltyTargets: [],
+        refillChoices: {},
         votingDone: false,
         lastRoundResult: roundRecord,
         players: nextPlayers,
@@ -723,11 +847,9 @@ export default function App() {
     });
   };
 
-  // 勝敗判定
   const isFinished = game.round === game.maxRounds && !!game.lastRoundResult;
   const herbivoreWins = game.scale >= config.herbMin && game.scale <= config.herbMax;
 
-  // 天秤ゲージ位置（-15〜+20の範囲を0〜100%へマップ）
   const gaugeMin = -15;
   const gaugeMax = Math.max(20, config.herbMax + 5);
   const scalePercent = Math.max(
@@ -746,6 +868,19 @@ export default function App() {
   const greenTotal = game.players.reduce((acc, p) => acc + (p.voteGreen || 0), 0);
   const redTotal = game.players.reduce((acc, p) => acc + (p.voteRed || 0), 0);
 
+  // 現在の補充選択を反映した残りサプライ枚数表示用
+  const remainingSupplyAfterChoices = useMemo(() => {
+    const rem = { ...returnedSupply };
+    refillInfo.order.forEach((pIdx) => {
+      const pid = game.players[pIdx].id;
+      const ch = resolvedRefillChoices[pid];
+      if (ch && (rem[ch] || 0) > 0) {
+        rem[ch] -= 1;
+      }
+    });
+    return rem;
+  }, [returnedSupply, refillInfo.order, game.players, resolvedRefillChoices]);
+
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 p-4 md:p-6">
       <div className="max-w-7xl mx-auto space-y-5">
@@ -755,11 +890,11 @@ export default function App() {
             <div className="flex items-center gap-2">
               <Scale className="w-6 h-6 text-emerald-700" />
               <h1 className="text-xl md:text-2xl font-bold tracking-tight">
-                『森の会議』ボードゲーム検証・シミュレータ（修正版）
+                『森の会議』ボードゲーム検証・シミュレータ
               </h1>
             </div>
             <p className="text-xs md:text-sm text-slate-600 mt-1">
-              1台で5〜15人分を操作可能 ・ 見張り/策士先行解決＆少数派先頭時計回り全員1枚補充 反映済
+              1台で5〜15人分を操作可能 ・ 見張り/策士先行解決＆少数派先頭時計回り全員任意1枚補充
             </p>
           </div>
 
@@ -893,11 +1028,14 @@ export default function App() {
               <Award className="w-8 h-8 shrink-0" />
               <div>
                 <h2 className="text-xl font-bold">
-                  第5ラウンド終了 — {herbivoreWins ? "🌿 草食陣営『実り豊かな森』の勝利！" : "🍖 肉食陣営『飢えと飽和の荒れ野』の勝利！"}
+                  第5ラウンド終了 —{" "}
+                  {herbivoreWins
+                    ? "🌿 草食陣営『実り豊かな森』の勝利！"
+                    : "🍖 肉食陣営『飢えと飽和の荒れ野』の勝利！"}
                 </h2>
                 <p className="text-sm mt-1">
-                  最終天秤位置: <strong>{game.scale > 0 ? `+${game.scale}` : game.scale}</strong> / 草食勝利条件:{" "}
-                  <strong>{config.winText}</strong>
+                  最終天秤位置: <strong>{game.scale > 0 ? `+${game.scale}` : game.scale}</strong> /
+                  草食勝利条件: <strong>{config.winText}</strong>
                 </p>
               </div>
             </div>
@@ -1010,7 +1148,7 @@ export default function App() {
             </div>
           )}
 
-          {/* Step 4: 公開＆役職解決（見張り・策士を先行解決 → 残り一斉公開・調停者/運び屋） */}
+          {/* Step 4: 公開＆役職解決 */}
           {game.step === 4 && (
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1131,17 +1269,17 @@ export default function App() {
             </div>
           )}
 
-          {/* Step 6: 両面トークン投票・天秤移動・少数派先頭時計回り全員1枚補充 */}
+          {/* Step 6: 両面トークン投票・天秤移動・各自任意1枚補充 */}
           {game.step === 6 && (
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h2 className="text-lg font-bold flex items-center gap-2">
                     <Vote className="w-5 h-5 text-indigo-700" />
-                    Step 6: 両面トークン投票・天秤移動・手札補充
+                    Step 6: 両面トークン投票・天秤移動・各自任意1枚補充
                   </h2>
                   <p className="text-sm text-slate-600">
-                    投票開示後に熱弁家・扇動者を適用し、天秤移動後、<strong>最も少数派アクション選択者のうち親から時計回りで一番近い人を先頭に、時計回りで全プレイヤーが1枚補充</strong>して次ラウンドへ進みます。
+                    投票開示後に熱弁家・扇動者を適用し、天秤移動後、<strong>最も少数派アクション選択者のうち親から時計回りで一番近い人を先頭に、時計回りで全員が任意の1枚を選択して補充</strong>します。
                   </p>
                 </div>
 
@@ -1186,6 +1324,92 @@ export default function App() {
                   現在の赤（反対）合計: <strong className="text-rose-700">{redTotal}</strong>
                 </span>
               </div>
+
+              {/* 各自が任意の1枚を選んで補充するパネル */}
+              {game.actionRevealDone && !isFinished && (
+                <div className="bg-indigo-50/70 border border-indigo-200 rounded-xl p-4 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm md:text-base font-bold text-indigo-950">
+                        手札補充カード選択（先頭: {game.players[refillInfo.startIndex]?.name} → 時計回りで全員1枚）
+                      </h3>
+                      <p className="text-xs text-indigo-800">
+                        返却予定カードを含めたサプライ在庫から、各プレイヤーが補充する1枚を任意に選べます。
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleRandomizeRefillChoices}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold cursor-pointer"
+                    >
+                      <Shuffle className="w-3.5 h-3.5" />
+                      補充カードをランダム選択
+                    </button>
+                  </div>
+
+                  {/* 返却後サプライ在庫＆選択後残数 */}
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    {ACTION_TYPES.map((actId) => {
+                      const m = ACTION_META[actId];
+                      return (
+                        <span
+                          key={actId}
+                          className="px-2.5 py-1 rounded bg-white border border-indigo-200 font-semibold"
+                        >
+                          {m.emoji} {m.shortName}: 返却後 {returnedSupply[actId] ?? 0}枚 → 選択後残{" "}
+                          <strong>{remainingSupplyAfterChoices[actId] ?? 0}</strong>枚
+                        </span>
+                      );
+                    })}
+                  </div>
+
+                  {/* 補充順リスト */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                    {refillInfo.order.map((pIdx, orderIdx) => {
+                      const p = game.players[pIdx];
+                      const chosenCard = resolvedRefillChoices[p.id] || "";
+                      const subAct = p.submittedAction ? ACTION_META[p.submittedAction].shortName : "-";
+
+                      return (
+                        <div
+                          key={p.id}
+                          className="bg-white border border-indigo-200 rounded-lg p-2.5 flex items-center justify-between gap-2 text-xs"
+                        >
+                          <div className="min-w-0">
+                            <div className="font-bold text-slate-900">
+                              #{orderIdx + 1} {p.name}
+                              {pIdx === refillInfo.startIndex ? "（少数派先頭）" : ""}
+                            </div>
+                            <div className="text-slate-500 truncate">
+                              今R提出: {subAct} / 次R役職:{" "}
+                              {p.submittedAction === "fox" || p.submittedAction === "monkey"
+                                ? "不可"
+                                : "可"}
+                            </div>
+                          </div>
+
+                          <select
+                            value={chosenCard}
+                            onChange={(e) => handleChangeRefillChoice(p.id, e.target.value)}
+                            className="border border-slate-300 rounded px-2 py-1 font-semibold bg-slate-50"
+                          >
+                            {ACTION_TYPES.map((actId) => {
+                              const m = ACTION_META[actId];
+                              const isCurrent = chosenCard === actId;
+                              const remCount = remainingSupplyAfterChoices[actId] ?? 0;
+                              const disabled = !isCurrent && remCount <= 0;
+                              return (
+                                <option key={actId} value={actId} disabled={disabled}>
+                                  {m.emoji} {m.shortName} {disabled ? "(在庫0)" : ""}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </section>
@@ -1264,7 +1488,15 @@ export default function App() {
                   return (
                     <button
                       key={actId}
-                      onClick={() => updatePlayer(selectedPlayer.id, { submittedAction: actId })}
+                      onClick={() =>
+                        setGame((prev) => ({
+                          ...prev,
+                          refillChoices: {},
+                          players: prev.players.map((p) =>
+                            p.id === selectedPlayer.id ? { ...p, submittedAction: actId } : p
+                          ),
+                        }))
+                      }
                       className={`p-2 rounded border text-left text-xs cursor-pointer ${
                         active
                           ? "bg-emerald-700 text-white border-emerald-800 font-bold"
@@ -1362,7 +1594,10 @@ export default function App() {
                     max={selectedPlayer.influence}
                     value={selectedPlayer.voteGreen || 0}
                     onChange={(e) => {
-                      const g = Math.max(0, Math.min(selectedPlayer.influence, Number(e.target.value) || 0));
+                      const g = Math.max(
+                        0,
+                        Math.min(selectedPlayer.influence, Number(e.target.value) || 0)
+                      );
                       const maxR = Math.max(0, selectedPlayer.influence - g);
                       updatePlayer(selectedPlayer.id, (p) => ({
                         ...p,
@@ -1382,7 +1617,10 @@ export default function App() {
                     max={Math.max(0, selectedPlayer.influence - (selectedPlayer.voteGreen || 0))}
                     value={selectedPlayer.voteRed || 0}
                     onChange={(e) => {
-                      const maxR = Math.max(0, selectedPlayer.influence - (selectedPlayer.voteGreen || 0));
+                      const maxR = Math.max(
+                        0,
+                        selectedPlayer.influence - (selectedPlayer.voteGreen || 0)
+                      );
                       const r = Math.max(0, Math.min(maxR, Number(e.target.value) || 0));
                       updatePlayer(selectedPlayer.id, { voteRed: r });
                     }}
